@@ -1,0 +1,9 @@
+# Pinned to the versions the Hermes repo already resolves (see pyproject.toml
+# `web` extra) so a shared virtualenv stays consistent.
+fastapi==0.133.1
+uvicorn[standard]==0.41.0
+starlette==1.0.1
+httpx==0.28.1
+
+# tests
+pytest==9.0.2

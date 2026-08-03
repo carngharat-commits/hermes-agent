@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.local
+
+# Python backend
+server/.venv/
+server/__pycache__/
+server/**/__pycache__/
+server/.pytest_cache/
