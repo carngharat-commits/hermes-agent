@@ -28,9 +28,11 @@ Vite proxies `/api` to the backend on `127.0.0.1:8787`, so the browser stays
 same-origin and the session cookie set by the OAuth callback is kept.
 
 With no `KITE_API_KEY` / `KITE_API_SECRET` set the backend serves a **stub**:
-the redirect, the session cookie, and logout all work end to end against a fake
-account, so the flow is testable before a Zerodha developer app exists. Copy
-`.env.example` to `.env` and fill it in to talk to the real thing.
+the redirect, the session cookie, logout, and a small set of fixture holdings
+all work end to end against a fake account, so the whole path is testable
+before a Zerodha developer app exists. Stub responses are tagged `mode: "stub"`
+and the UI labels them as such — they are not a real book. Copy `.env.example`
+to `.env` and fill it in to talk to the real thing.
 
 ## Scripts
 
@@ -41,7 +43,7 @@ account, so the flow is testable before a Zerodha developer app exists. Copy
 | `npm run typecheck` | Types only |
 | `npm run lint` | ESLint |
 | `node scripts/smoke.mjs` | Drives every tab + the Kite flow in Chromium (see header for setup) |
-| `cd server && pytest` | Backend tests (14, no network) |
+| `cd server && pytest` | Backend tests (32, no network) |
 
 ## Layout
 
@@ -53,7 +55,9 @@ src/
   theme/                    design tokens (T) + theme context
   lib/                      formatting (₹/$/%), seeded chart generation, constants
   data/                     the artifact's bundled snapshot: holdings, market,
-                            signals, risk, brokers, calendar, roadmap
+                            signals, risk, brokers, calendar, roadmap — plus
+                            usePortfolio.ts, which merges live Kite holdings
+                            over the Zerodha slice of it
   components/ui/            Card, Pill, Btn, Row, KV, Field, Stub, …
   components/shell/         Sidebar, TopBar, MarketTicker, Shell, nav map
   features/<area>/          one directory per tab — dashboard, portfolio,
@@ -104,9 +108,26 @@ would have buried the actual migration. The intended path:
 exchange, server-side session, logout, and a state nonce binding the callback
 to a login this app started. Backed by tests; see `server/README.md`.
 
-**Step 2 — real portfolio data.** `server/` already proxies
-`/portfolio/holdings`, `/portfolio/positions`, and `/user/margins` with a valid
-token. What's missing is mapping Kite's payloads onto the shapes in
-`src/data/holdings.ts` and having the UI read from the API instead of the
-bundled snapshot. Everything in `src/data/` is that snapshot — the components
-consume it through plain imports today, which is the seam to replace.
+**Step 2 — real portfolio data — done.** `GET /api/kite/portfolio` returns
+holdings already mapped to the UI's shape, plus positions, margins and a
+summary. `data/usePortfolio.ts` merges them into what the app renders.
+
+The merge rule matters: **Kite speaks for one broker, so a live sync replaces
+exactly the Zerodha slice.** ABML, INDmoney, mutual funds, crypto and metals
+stay on the bundled snapshot, because nothing has been connected that could
+speak for them. Manually added holdings sit on top of both. The Portfolio tab
+carries a badge saying which of the three you're looking at — snapshot, live,
+or stub fixtures — and tapping it explains the caveat.
+
+Two mapping decisions worth knowing (`server/tradepulse_server/mapping.py`):
+`qty` sums `quantity` and `t1_quantity`, so a portfolio doesn't shrink for a
+day after every buy; `pledged` is `collateral_quantity > 0`, since Kite reports
+pledging as a quantity split rather than a flag.
+
+**Step 3 — the rest of the surfaces.** Everything outside holdings is still
+bundled data: signals, opportunities, the intelligence feed, the calendar, the
+order book, risk scenarios. Orders are the natural next one — `ORDERS` and
+`GTT_ORDERS` in `src/data/trading.ts` map onto Kite's `/orders` and
+`/gtt/triggers`, and the passthrough route pattern is already there. Live
+quotes (`/quote`) would replace the static `MARKET` block and make `dayPct`
+move. Beyond that: multi-user sessions, and a real store behind `SessionStore`.

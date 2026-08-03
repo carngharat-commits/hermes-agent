@@ -65,10 +65,13 @@ export const KiteConnectCard = () => {
     setBusy(true);
     try {
       await logoutKite();
-      setSession({ authenticated: false, mode: status?.mode ?? "stub" });
+      // Holdings are read by usePortfolio() at the app root, which has no way
+      // to hear about this. Connecting already costs a full navigation
+      // (the OAuth redirect), so disconnecting reloads to match — the whole
+      // app then re-reads and falls back to the bundled snapshot.
+      window.location.reload();
     } catch (e) {
       setError((e as Error).message);
-    } finally {
       setBusy(false);
     }
   };

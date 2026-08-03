@@ -46,6 +46,19 @@ for (const tab of TABS) {
   console.log(`  ${tab.padEnd(14)} ${text.split("\n")[0].slice(0, 46)}`);
 }
 
+// Before connecting, holdings are the bundled snapshot.
+const badge = async () => {
+  await page.getByRole("button", { name: /^Portfolio/ }).first().click();
+  await page.waitForTimeout(300);
+  // Pill renders uppercase via CSS, and innerText reflects that.
+  const found = (await page.locator("main").innerText()).match(/kite live|kite stub|snapshot/i);
+  return found?.[0].toLowerCase();
+};
+
+const before = await badge();
+if (before !== "snapshot") errors.push(`portfolio: expected snapshot before connecting, got ${before}`);
+else console.log("  Portfolio src  Snapshot (not connected)");
+
 // Kite connect round trip (stub mode bounces straight back through /callback).
 await page.getByRole("button", { name: /^Accounts/ }).first().click();
 const connect = page.getByRole("button", { name: "Connect Zerodha" });
@@ -59,6 +72,20 @@ if (await connect.count()) {
 } else {
   console.log("  Kite connect   skipped (already connected)");
 }
+
+// ...and after connecting, the Zerodha slice is live and the rest is not.
+const after = await badge();
+if (after !== "kite stub") errors.push(`portfolio: expected kite stub after connecting, got ${after}`);
+else console.log("  Portfolio src  Kite stub (Zerodha slice synced)");
+
+await page.getByRole("button", { name: /^Portfolio/ }).first().click();
+await page.getByText("Indian Equities").first().click();
+await page.waitForTimeout(400);
+const drill = await page.locator("main").innerText();
+if (!drill.includes("RELIANCE")) errors.push("portfolio: live RELIANCE row missing after sync");
+if (drill.includes("AEQUS")) errors.push("portfolio: snapshot Zerodha rows survived the sync");
+if (!drill.includes("SBIN")) errors.push("portfolio: non-Zerodha (ABML) rows were wrongly dropped");
+if (!errors.length) console.log("  Holdings merge live Zerodha rows in, snapshot Zerodha rows out, ABML kept");
 
 await browser.close();
 

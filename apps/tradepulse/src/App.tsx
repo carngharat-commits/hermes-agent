@@ -6,7 +6,7 @@ import { useState, useMemo, useEffect } from "react";
 import { AccountsTab } from "@/features/accounts/AccountsTab";
 import { AddSheet } from "@/features/portfolio/AddSheet";
 import { AlgoTab } from "@/features/algo/AlgoTab";
-import { CRYPTO, DIGITAL_METALS, IN_STOCKS, MUTUAL_FUNDS, US_STOCKS } from "@/data/holdings";
+import { usePortfolio } from "@/data/usePortfolio";
 import { CalendarTab } from "@/features/calendar/CalendarTab";
 import { DARK_TOKENS, LIGHT_TOKENS, T } from "@/theme/tokens";
 import { DashboardTab } from "@/features/dashboard/DashboardTab";
@@ -52,7 +52,10 @@ export default function TradePulse() {
     return () => mq.removeEventListener?.("change", listener);
   }, [themeMode]);
 
-  const [holdings, setHoldings] = useState([...IN_STOCKS, ...US_STOCKS, ...MUTUAL_FUNDS, ...CRYPTO, ...DIGITAL_METALS]);
+  // Holdings come from the bundled snapshot until a Kite session exists, at
+  // which point the Zerodha slice is replaced by the live book. See
+  // data/usePortfolio.ts.
+  const { holdings, source: holdingsSource, addHolding } = usePortfolio();
   const [watchlist, setWatchlist] = useState([]);
 
   const handleSave = (item) => {
@@ -64,7 +67,7 @@ export default function TradePulse() {
         ...(item.segment === "CR" ? { name: item.sym, current: item.qty * item.ltp, invested: item.qty * item.avg, exchange: item.broker } : {}),
         ...(item.segment === "PM" ? { name: item.sym, current: item.qty * item.ltp, invested: item.qty * item.avg, unit: "g" } : {}),
       };
-      setHoldings([...holdings, h]);
+      addHolding(h);
     } else {
       setWatchlist([{
         id: item.id, sym: item.sym, qty: item.qty, target: item.target, ltp: item.ltp,
@@ -81,7 +84,7 @@ export default function TradePulse() {
     if (watchOpen) return <WatchlistView watchlist={watchlist} onAdd={() => openAdd("watchlist")}
       onRemove={id => setWatchlist(watchlist.filter(w => w.id !== id))} onBack={() => setWatchOpen(false)} />;
     if (segmentDrill) return <SegmentDrill segment={segmentDrill} holdings={holdings} onBack={() => setSegmentDrill(null)} />;
-    return <PortfolioTab holdings={holdings} watchlist={watchlist}
+    return <PortfolioTab holdings={holdings} watchlist={watchlist} source={holdingsSource}
       onOpenSegment={k => setSegmentDrill(k)}
       onOpenWatchlist={() => setWatchOpen(true)}
       onAdd={() => openAdd("holding")} />;

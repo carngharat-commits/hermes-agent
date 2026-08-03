@@ -199,9 +199,19 @@ class StubKiteClient(KiteClient):
         return None
 
     async def get(self, path: str, access_token: str) -> Any:
-        raise KiteError(
-            "Portfolio data needs real Kite credentials — set KITE_API_KEY and "
-            "KITE_API_SECRET, then log in again.",
-            status=501,
-            error_type="NotImplemented",
-        )
+        """Serve the fixture for a known path; anything else is a real 501.
+
+        Responses built from these are tagged ``mode: "stub"`` all the way to
+        the UI, which shows the provenance rather than passing them off as an
+        account.
+        """
+        from . import fixtures
+
+        if path not in fixtures.BY_PATH:
+            raise KiteError(
+                f"No stub fixture for {path} — set KITE_API_KEY and "
+                "KITE_API_SECRET to call the real API.",
+                status=501,
+                error_type="NotImplemented",
+            )
+        return fixtures.BY_PATH[path]

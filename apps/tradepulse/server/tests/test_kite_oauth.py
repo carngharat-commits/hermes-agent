@@ -142,9 +142,20 @@ def test_portfolio_routes_need_a_session(client: TestClient):
     assert response.json()["error_type"] == "TokenException"
 
 
-def test_portfolio_routes_are_not_implemented_in_stub_mode(client: TestClient):
+def test_portfolio_routes_serve_stub_fixtures_once_connected(client: TestClient):
     client.get(client.get("/api/kite/login").headers["location"])
 
     response = client.get("/api/kite/holdings")
-    assert response.status_code == 501
-    assert "KITE_API_KEY" in response.json()["error"]
+    assert response.status_code == 200
+    assert response.json()["data"][0]["tradingsymbol"] == "RELIANCE"
+
+
+def test_unfixtured_paths_still_report_not_implemented():
+    from tradepulse_server.kite import KiteError, StubKiteClient
+
+    stub = StubKiteClient()
+    with pytest.raises(KiteError) as caught:
+        import asyncio
+
+        asyncio.run(stub.get("/orders", "stub-access-token"))
+    assert caught.value.status == 501

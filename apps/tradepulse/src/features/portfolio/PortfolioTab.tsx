@@ -7,9 +7,10 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { KV } from "@/components/ui/KV";
+import { SourceBadge } from "@/components/ui/SourceBadge";
 import { cvINR, inrCompact, ivINR, pct, toINR_us } from "@/lib/format";
 
-export const PortfolioTab = ({ holdings, watchlist, onOpenSegment, onOpenWatchlist, onAdd }: any) => {
+export const PortfolioTab = ({ holdings, watchlist, onOpenSegment, onOpenWatchlist, onAdd, source = "snapshot" }: any) => {
   const segs = ["IN", "US", "MF", "PM", "CR"].map(k => {
     const list = holdings.filter(h => h.segment === k);
     const cv = list.reduce((s, h) => s + cvINR(h), 0);
@@ -37,7 +38,10 @@ export const PortfolioTab = ({ holdings, watchlist, onOpenSegment, onOpenWatchli
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-[22px] font-bold tracking-tight">Portfolio Tracking</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-[22px] font-bold tracking-tight">Portfolio Tracking</h1>
+            <SourceBadge source={source} />
+          </div>
           <div className="text-[12px] mt-1" style={{ color: T.fgMute }}>
             {holdings.length} holdings across 6 accounts · {inrCompact(total)} net worth
           </div>

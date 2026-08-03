@@ -7,6 +7,7 @@ server/README.md for what step 2 has to replace.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -16,6 +17,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from .config import Settings, load_settings
 from .kite import KiteClient, KiteError, StubKiteClient
+from .mapping import map_holdings, map_margins, map_positions, summarize
 from .sessions import SessionStore, issue_state, verify_state
 
 STATE_PARAM = "tp_state"
@@ -157,10 +159,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
 
-    # ---- portfolio passthrough -------------------------------------------
-    # STUB (roadmap step 2): the UI still reads its bundled snapshot. These
-    # routes prove the token works; mapping Kite's payloads onto the shapes in
-    # src/data/holdings.ts is the next slice of work.
+    @app.get("/api/kite/portfolio")
+    async def portfolio(
+        cfg: Settings = Depends(current_settings),
+        store: SessionStore = Depends(current_store),
+        kite: KiteClient = Depends(current_client),
+        session_cookie: str | None = Cookie(default=None, alias="tradepulse_session"),
+    ) -> Any:
+        """Everything the UI needs to replace its Zerodha slice, in one call.
+
+        Holdings are the load-bearing part; positions and margins are fetched
+        alongside but must not sink the response if they fail, since a user
+        with no F&O access gets an error on /portfolio/positions.
+        """
+        session = store.get(session_cookie)
+        if session is None:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Not connected to Kite.", "error_type": "TokenException"},
+            )
+
+        raw_holdings = await kite.get("/portfolio/holdings", session.access_token)
+        holdings = map_holdings(raw_holdings)
+
+        extras: dict[str, Any] = {"positions": [], "margins": {}}
+        partial: list[str] = []
+        for label, path, mapper in (
+            ("positions", "/portfolio/positions", map_positions),
+            ("margins", "/user/margins", map_margins),
+        ):
+            try:
+                extras[label] = mapper(await kite.get(path, session.access_token))
+            except KiteError:
+                partial.append(label)
+
+        return {
+            "mode": "live" if cfg.configured else "stub",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "broker": "Zerodha",
+            "holdings": holdings,
+            "positions": extras["positions"],
+            "margins": extras["margins"],
+            "summary": summarize(holdings),
+            # Names the UI can mention instead of silently showing less.
+            "unavailable": partial,
+        }
+
+    # ---- raw passthrough --------------------------------------------------
+    # Unmapped Kite responses, kept for debugging a sync against what the API
+    # actually returned. /api/kite/portfolio is what the UI consumes.
     for name, path in (
         ("holdings", "/portfolio/holdings"),
         ("positions", "/portfolio/positions"),

@@ -44,10 +44,28 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 | `GET /api/kite/callback` | Steps 2–4 — verify, exchange, set cookie, bounce back |
 | `GET /api/kite/session` | Current session's profile, or `authenticated: false` |
 | `POST /api/kite/logout` | Invalidate the Kite token and drop the session |
-| `GET /api/kite/{holdings,positions,margins}` | Authenticated passthrough to Kite |
+| `GET /api/kite/portfolio` | Holdings/positions/margins mapped to the UI's shapes — what the frontend consumes |
+| `GET /api/kite/{holdings,positions,margins}` | Raw, unmapped passthrough, for debugging a sync |
 
 Failures on the callback don't render an error page — they redirect back to the
 UI with `?kite_error=<reason>`, which `KiteConnectCard` turns into a banner.
+
+## Mapping (`mapping.py`)
+
+Pure functions, dicts in and dicts out, turning Kite's vocabulary into the
+shape `src/data/holdings.ts` uses. Two calls are decisions rather than renames:
+
+- **`qty` sums `quantity` and `t1_quantity`.** T1 stock is bought and paid for
+  but still settling; excluding it makes a portfolio shrink for a day after
+  every buy.
+- **`pledged` is `collateral_quantity > 0`.** Kite reports pledging as a
+  quantity split rather than a flag, so any collateralised quantity marks the
+  whole row — the same granularity the UI's existing ABML rows use.
+
+`/api/kite/portfolio` treats holdings as load-bearing and positions/margins as
+best-effort: a user without F&O access gets a 403 on `/portfolio/positions`,
+and that must not take the sync down. Failed side calls are named in
+`unavailable` so the UI can say what's missing instead of quietly showing less.
 
 ## What's still a stub
 
@@ -55,10 +73,13 @@ UI with `?kite_error=<reason>`, which `KiteConnectCard` turns into a banner.
   everyone out and a second worker shares nothing with the first. Back
   `SessionStore` with Redis or a table before this runs anywhere real — the
   interface is four methods wide, deliberately.
-- **Portfolio routes return Kite's payloads raw.** They prove the token works;
-  mapping them onto the shapes in `src/data/holdings.ts` is step 2.
+- **No caching or rate-limit handling.** Every page load hits Kite three
+  times. Kite's published limit is 3 req/s, so one user is fine and a handful
+  is not.
 - **Single-user assumption.** One session cookie, one Kite account, no notion
   of a TradePulse user owning the broker connection.
+- **Only holdings are live.** Orders, GTTs, quotes and everything else the UI
+  renders still come from the bundled snapshot.
 - **`state_secret` defaults to a per-process random value.** Fine for one dev
   process, wrong for more than one — set `TRADEPULSE_STATE_SECRET`.
 

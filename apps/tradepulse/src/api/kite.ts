@@ -23,6 +23,50 @@ export type KiteSession =
   | { authenticated: false; mode: KiteMode }
   | { authenticated: true; mode: KiteMode; profile: KiteProfile };
 
+/** A holding in the shape `src/data/holdings.ts` uses. */
+export type KiteHolding = {
+  sym: string;
+  qty: number;
+  avg: number;
+  ltp: number;
+  dayPct: number;
+  broker: string;
+  segment: string;
+  isin: string;
+  pledged: boolean;
+  exchange: string;
+};
+
+export type KitePosition = {
+  sym: string;
+  exchange: string;
+  product: string;
+  qty: number;
+  avg: number;
+  ltp: number;
+  pnl: number;
+  dayPct: number;
+  broker: string;
+};
+
+export type KitePortfolio = {
+  mode: KiteMode;
+  fetched_at: string;
+  broker: string;
+  holdings: KiteHolding[];
+  positions: KitePosition[];
+  margins: Record<string, { enabled: boolean; net: number; live_balance: number; cash: number }>;
+  summary: {
+    count: number;
+    current_value: number;
+    invested_value: number;
+    pnl: number;
+    pnl_pct: number;
+  };
+  /** Side calls that failed — the response is still usable without them. */
+  unavailable: string[];
+};
+
 const LOGIN_PATH = "/api/kite/login";
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,6 +81,8 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const getKiteStatus = () => json<KiteStatus>("/api/kite/status");
 
 export const getKiteSession = () => json<KiteSession>("/api/kite/session");
+
+export const getKitePortfolio = () => json<KitePortfolio>("/api/kite/portfolio");
 
 export const logoutKite = () =>
   json<{ authenticated: false }>("/api/kite/logout", { method: "POST" });
