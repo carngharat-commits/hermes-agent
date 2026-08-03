@@ -1,3 +1,8 @@
+# The repo root ignores `data/`, which matches at any depth and would swallow
+# this app's src/data (holdings, market, signals — the whole bundled snapshot).
+# A deeper .gitignore wins, so re-include it here.
+!src/data/
+
 node_modules/
 dist/
 .env
