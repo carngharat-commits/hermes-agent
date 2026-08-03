@@ -67,6 +67,44 @@ export type KitePortfolio = {
   unavailable: string[];
 };
 
+/** An order row in the shape `src/data/trading.ts` uses. */
+export type KiteOrder = {
+  id: string;
+  sym: string;
+  side: string;
+  type: string;
+  qty: number;
+  price: number;
+  status: string;
+  broker: string;
+  when: string;
+  segment: string;
+  reason: string;
+  /** Kite's own status, since the UI collapses a dozen states into three. */
+  kiteStatus: string;
+};
+
+export type KiteGtt = {
+  id: string;
+  sym: string;
+  trigger: number;
+  action: string;
+  qty: number;
+  status: string;
+  broker: string;
+  created: string;
+  note: string;
+};
+
+export type KiteOrderBook = {
+  mode: KiteMode;
+  fetched_at: string;
+  broker: string;
+  orders: KiteOrder[];
+  gtts: KiteGtt[];
+  unavailable: string[];
+};
+
 const LOGIN_PATH = "/api/kite/login";
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -83,6 +121,8 @@ export const getKiteStatus = () => json<KiteStatus>("/api/kite/status");
 export const getKiteSession = () => json<KiteSession>("/api/kite/session");
 
 export const getKitePortfolio = () => json<KitePortfolio>("/api/kite/portfolio");
+
+export const getKiteOrders = () => json<KiteOrderBook>("/api/kite/orders");
 
 export const logoutKite = () =>
   json<{ authenticated: false }>("/api/kite/logout", { method: "POST" });

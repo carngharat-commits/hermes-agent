@@ -87,6 +87,23 @@ if (drill.includes("AEQUS")) errors.push("portfolio: snapshot Zerodha rows survi
 if (!drill.includes("SBIN")) errors.push("portfolio: non-Zerodha (ABML) rows were wrongly dropped");
 if (!errors.length) console.log("  Holdings merge live Zerodha rows in, snapshot Zerodha rows out, ABML kept");
 
+// Orders follow the same merge rule.
+await page.getByRole("button", { name: /^Orders/ }).first().click();
+await page.waitForTimeout(400);
+const book = await page.locator("main").innerText();
+if (!/kite stub/i.test(book)) errors.push("orders: expected the source badge to read Kite stub");
+if (!book.includes("Insufficient margin")) errors.push("orders: live rejected order missing");
+if (book.includes("O-1042")) errors.push("orders: snapshot Zerodha orders survived the sync");
+if (!book.includes("O-1038")) errors.push("orders: non-Zerodha (INDmoney) order was wrongly dropped");
+else console.log("  Orders merge   live Zerodha orders in, INDmoney order kept");
+
+await page.getByRole("button", { name: /^GTT Orders/ }).first().click();
+await page.waitForTimeout(400);
+const gtt = await page.locator("main").innerText();
+// The two-leg TATASTEEL trigger must render as two rows, not one.
+if ((gtt.match(/TATASTEEL/g) ?? []).length < 2) errors.push("gtt: two-leg trigger did not split into two rows");
+else console.log("  GTT split      two-leg trigger renders as two rows");
+
 await browser.close();
 
 if (errors.length) {

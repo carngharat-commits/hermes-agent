@@ -5,19 +5,18 @@ import { useState, useMemo } from "react";
 
 import { Card } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { ORDERS } from "@/data/trading";
 import { OrderRow } from "@/features/orders/OrderRow";
 
-export const OrderBookView = () => {
+export const OrderBookView = ({ orders }: any) => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const filtered = useMemo(() => {
-    return ORDERS.filter(o => {
+    return orders.filter(o => {
       if (statusFilter !== "all" && o.status !== statusFilter) return false;
       if (typeFilter   !== "all" && o.type   !== typeFilter) return false;
       return true;
     });
-  }, [statusFilter, typeFilter]);
+  }, [orders, statusFilter, typeFilter]);
   return (
     <>
       <Card padded={false} className="p-3 space-y-2">

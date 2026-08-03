@@ -6,20 +6,24 @@ import { Activity, ClipboardList, Info, Plus, Target } from "lucide-react";
 
 import { Btn } from "@/components/ui/Btn";
 import { GTTView } from "@/features/orders/GTTView";
-import { GTT_ORDERS, ORDERS } from "@/data/trading";
+import { SourceBadge } from "@/components/ui/SourceBadge";
 import { OrderBookView } from "@/features/orders/OrderBookView";
 import { Pill } from "@/components/ui/Pill";
 import { PlaceOrderSheet } from "@/features/orders/PlaceOrderSheet";
 import { T } from "@/theme/tokens";
 import { TradesView } from "@/features/orders/TradesView";
+import { useOrders } from "@/data/useOrders";
 
 export const OrdersTab = () => {
   const [tab, setTab] = useState("book"); // book | gtt | trades
   const [placeOpen, setPlaceOpen] = useState(false);
+  // Zerodha rows come from Kite once connected; other brokers stay on the
+  // bundled snapshot. See data/useOrders.ts.
+  const { orders, gtts, source, error } = useOrders();
   const tabs = [
-    { k:"book",   l:"Order Book",    ic:ClipboardList, n:ORDERS.length },
-    { k:"gtt",    l:"GTT Orders",    ic:Target,        n:GTT_ORDERS.filter(g=>g.status==="ACTIVE").length },
-    { k:"trades", l:"Trades",        ic:Activity,      n:ORDERS.filter(o=>o.status==="EXECUTED").length },
+    { k:"book",   l:"Order Book",    ic:ClipboardList, n:orders.length },
+    { k:"gtt",    l:"GTT Orders",    ic:Target,        n:gtts.filter(g=>g.status==="ACTIVE").length },
+    { k:"trades", l:"Trades",        ic:Activity,      n:orders.filter(o=>o.status==="EXECUTED").length },
   ];
   return (
     <div className="space-y-5">
@@ -27,6 +31,7 @@ export const OrdersTab = () => {
         <div>
           <h1 className="text-[22px] font-bold tracking-tight flex items-center gap-2">
             <ClipboardList size={20} color={T.primary} /> Orders
+            <SourceBadge source={source} />
           </h1>
           <div className="text-[12px] mt-1" style={{ color: T.fgMute }}>
             Decision-support view — TradePulse doesn't route orders. Execute in your broker app.
@@ -64,9 +69,16 @@ export const OrdersTab = () => {
         })}
       </div>
 
-      {tab === "book"   && <OrderBookView />}
-      {tab === "gtt"    && <GTTView />}
-      {tab === "trades" && <TradesView />}
+      {error && (
+        <div className="p-2.5 rounded-lg text-[11px] leading-relaxed"
+          style={{ background: `${T.warn}10`, border: `1px solid ${T.warn}30`, color: T.fg }}>
+          {error}
+        </div>
+      )}
+
+      {tab === "book"   && <OrderBookView orders={orders} />}
+      {tab === "gtt"    && <GTTView gtts={gtts} />}
+      {tab === "trades" && <TradesView orders={orders} />}
 
       {placeOpen && <PlaceOrderSheet onClose={() => setPlaceOpen(false)} />}
     </div>

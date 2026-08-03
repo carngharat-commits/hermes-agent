@@ -2,7 +2,7 @@
    Only the module header and the `export` keyword are new. */
 
 import { useState } from "react";
-import { ChevronDown, Sparkles, Zap } from "lucide-react";
+import { Check, ChevronDown, Sparkles, Zap } from "lucide-react";
 
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
@@ -40,6 +40,9 @@ export const RoadmapCard = () => {
                     <span className="text-[12.5px] font-semibold" style={{ color: T.fg }}>{r.title}</span>
                     <Pill tone="neutral" size="xs">{r.weeks}</Pill>
                     <Pill tone="warn" size="xs">{r.cost}</Pill>
+                    {r.shipped?.length > 0 && (
+                      <Pill tone="up" size="xs">{r.shipped.length} shipped</Pill>
+                    )}
                   </div>
                   <div className="text-[11px] mt-1" style={{ color: T.fgMute }}>{r.goal}</div>
                 </div>
@@ -48,6 +51,21 @@ export const RoadmapCard = () => {
               </button>
               {active && (
                 <div className="px-3 pb-3" style={{ borderTop: `1px solid ${T.border}` }}>
+                  {r.shipped?.length > 0 && (
+                    <>
+                      <div className="text-[10.5px] uppercase tracking-widest font-semibold mt-2 mb-2" style={{ color: T.primary, ...FONT_MONO }}>
+                        Shipped
+                      </div>
+                      <ul className="space-y-1.5 mb-3">
+                        {r.shipped.map((t, i) => (
+                          <li key={i} className="flex items-start gap-2 text-[11.5px] leading-relaxed">
+                            <Check size={12} color={T.primary} className="mt-0.5 shrink-0" />
+                            <span style={{ color: T.fg }}>{t}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   <div className="text-[10.5px] uppercase tracking-widest font-semibold mt-2 mb-2" style={{ color: T.fgMute, ...FONT_MONO }}>
                     Concrete todos
                   </div>

@@ -5,11 +5,10 @@ import { Info } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { GTT_ORDERS } from "@/data/trading";
 import { Pill } from "@/components/ui/Pill";
 import { Row } from "@/components/ui/Row";
 
-export const GTTView = () => (
+export const GTTView = ({ gtts }: any) => (
   <>
     <div className="p-2.5 rounded-lg flex items-start gap-2 mb-4" style={{ background: `${T.violet}10`, border: `1px solid ${T.violet}30` }}>
       <Info size={13} color={T.violet} className="mt-0.5 shrink-0" />
@@ -19,7 +18,7 @@ export const GTTView = () => (
     </div>
 
     <Card padded={false}>
-      {GTT_ORDERS.map(g => {
+      {gtts.map(g => {
         const active = g.status === "ACTIVE";
         return (
           <Row key={g.id}>

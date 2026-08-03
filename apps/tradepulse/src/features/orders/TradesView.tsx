@@ -3,13 +3,12 @@
 
 import { Card } from "@/components/ui/Card";
 import { KV } from "@/components/ui/KV";
-import { ORDERS } from "@/data/trading";
 import { OrderRow } from "@/features/orders/OrderRow";
 import { USD_INR } from "@/lib/constants";
 import { inrCompact } from "@/lib/format";
 
-export const TradesView = () => {
-  const trades = ORDERS.filter(o => o.status === "EXECUTED");
+export const TradesView = ({ orders }: any) => {
+  const trades = orders.filter(o => o.status === "EXECUTED");
   const totalBought = trades.filter(t => t.side === "BUY").reduce((s, t) => s + t.qty * t.price * (t.segment === "US" ? USD_INR : 1), 0);
   const totalSold = trades.filter(t => t.side === "SELL").reduce((s, t) => s + t.qty * t.price * (t.segment === "US" ? USD_INR : 1), 0);
   return (

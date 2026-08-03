@@ -115,6 +115,87 @@ def map_margins(payload: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
+# Kite reports a dozen order states; the UI's order row understands three
+# (plus a catch-all that renders red). Anything still in flight is PENDING.
+_TERMINAL_STATUS = {
+    "COMPLETE": "EXECUTED",
+    "REJECTED": "REJECTED",
+    "CANCELLED": "CANCELLED",
+}
+
+
+def map_order(row: dict[str, Any]) -> dict[str, Any]:
+    """One row of ``GET /orders``.
+
+    ``price`` is the filled average where there is one: an executed order's
+    limit price is what was asked, and ``average_price`` is what was paid.
+    Showing the ask on a filled order would misreport the book.
+    """
+    raw_status = (row.get("status") or "").upper()
+    average = _num(row.get("average_price"))
+    return {
+        "id": str(row.get("order_id", "")),
+        "sym": row.get("tradingsymbol", ""),
+        "side": row.get("transaction_type", ""),
+        "type": row.get("product", ""),
+        "qty": _num(row.get("quantity")),
+        "price": average if average > 0 else _num(row.get("price")),
+        "status": _TERMINAL_STATUS.get(raw_status, "PENDING"),
+        "broker": BROKER,
+        "when": row.get("order_timestamp", "") or "",
+        "segment": SEGMENT_EQUITY,
+        "reason": row.get("status_message") or "",
+        "kiteStatus": raw_status,
+    }
+
+
+def map_orders(rows: Iterable[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Newest first, matching how the UI's order book is ordered."""
+    mapped = [map_order(row) for row in rows or [] if row.get("tradingsymbol")]
+    return sorted(mapped, key=lambda o: o["when"], reverse=True)
+
+
+def map_gtt(trigger: dict[str, Any]) -> list[dict[str, Any]]:
+    """One GTT -> one row per leg.
+
+    A two-leg GTT (stop-loss + target) carries two trigger values and two
+    orders. The UI's row is single-trigger, and the bundled snapshot already
+    represents such a pair as two rows, so split rather than collapse.
+    """
+    condition = trigger.get("condition") or {}
+    legs = trigger.get("orders") or []
+    values = condition.get("trigger_values") or []
+    status = (trigger.get("status") or "").upper()
+    created = (trigger.get("created_at") or "").split(" ")[0]
+    gtt_id = trigger.get("id", "")
+    kind = trigger.get("type", "")
+
+    rows: list[dict[str, Any]] = []
+    for index, leg in enumerate(legs):
+        value = values[index] if index < len(values) else (values[0] if values else 0)
+        rows.append({
+            # Legs of one trigger share a Kite id; suffix so React keys stay unique.
+            "id": f"{gtt_id}" if len(legs) == 1 else f"{gtt_id}-{index + 1}",
+            "sym": condition.get("tradingsymbol", "") or leg.get("tradingsymbol", ""),
+            "trigger": _num(value),
+            "action": leg.get("transaction_type", ""),
+            "qty": _num(leg.get("quantity")),
+            "status": status,
+            "broker": BROKER,
+            "created": created,
+            # No free-text note exists on a Kite GTT; say what it actually is.
+            "note": " · ".join(x for x in (kind, leg.get("order_type", "")) if x),
+        })
+    return rows
+
+
+def map_gtts(triggers: Iterable[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for trigger in triggers or []:
+        rows.extend(map_gtt(trigger))
+    return [r for r in rows if r["sym"]]
+
+
 def summarize(holdings: list[dict[str, Any]]) -> dict[str, Any]:
     """Totals the UI would otherwise recompute, so the two agree."""
     current = sum(h["qty"] * h["ltp"] for h in holdings)

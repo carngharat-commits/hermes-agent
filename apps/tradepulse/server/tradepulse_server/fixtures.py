@@ -74,8 +74,115 @@ STUB_MARGINS: dict[str, Any] = {
     "commodity": {"enabled": False, "net": 0, "available": {}},
 }
 
+STUB_ORDERS: list[dict[str, Any]] = [
+    {
+        "order_id": "260731000000001",
+        "status": "COMPLETE",
+        "tradingsymbol": "RELIANCE",
+        "exchange": "NSE",
+        "transaction_type": "BUY",
+        "order_type": "LIMIT",
+        "product": "CNC",
+        "price": 1200.00,
+        "average_price": 1198.75,
+        "quantity": 10,
+        "filled_quantity": 10,
+        "pending_quantity": 0,
+        "order_timestamp": "2026-07-29 09:32:11",
+        "status_message": None,
+    },
+    {
+        "order_id": "260731000000002",
+        "status": "OPEN",
+        "tradingsymbol": "AXISBANK",
+        "exchange": "NSE",
+        "transaction_type": "BUY",
+        "order_type": "LIMIT",
+        "product": "CNC",
+        "price": 1225.00,
+        "average_price": 0.0,
+        "quantity": 5,
+        "filled_quantity": 0,
+        "pending_quantity": 5,
+        "order_timestamp": "2026-07-31 09:16:04",
+        "status_message": None,
+    },
+    {
+        "order_id": "260731000000003",
+        "status": "REJECTED",
+        "tradingsymbol": "TATASTEEL",
+        "exchange": "NSE",
+        "transaction_type": "SELL",
+        "order_type": "MARKET",
+        "product": "MIS",
+        "price": 0.0,
+        "average_price": 0.0,
+        "quantity": 100,
+        "order_timestamp": "2026-07-30 11:04:52",
+        "status_message": "Insufficient margin",
+    },
+]
+
+STUB_GTTS: list[dict[str, Any]] = [
+    {
+        "id": 901001,
+        "type": "single",
+        "status": "active",
+        "created_at": "2026-07-15 10:02:00",
+        "condition": {
+            "exchange": "NSE",
+            "tradingsymbol": "RELIANCE",
+            "last_price": 1275.90,
+            "trigger_values": [1400.0],
+        },
+        "orders": [
+            {
+                "tradingsymbol": "RELIANCE",
+                "transaction_type": "SELL",
+                "order_type": "LIMIT",
+                "product": "CNC",
+                "quantity": 10,
+                "price": 1400.0,
+            }
+        ],
+    },
+    {
+        # Two-leg: stop-loss and target on one trigger. Splits into two rows.
+        "id": 901002,
+        "type": "two-leg",
+        "status": "active",
+        "created_at": "2026-07-22 14:41:00",
+        "condition": {
+            "exchange": "NSE",
+            "tradingsymbol": "TATASTEEL",
+            "last_price": 187.27,
+            "trigger_values": [160.0, 230.0],
+        },
+        "orders": [
+            {
+                "tradingsymbol": "TATASTEEL",
+                "transaction_type": "SELL",
+                "order_type": "LIMIT",
+                "product": "CNC",
+                "quantity": 100,
+                "price": 160.0,
+            },
+            {
+                "tradingsymbol": "TATASTEEL",
+                "transaction_type": "SELL",
+                "order_type": "LIMIT",
+                "product": "CNC",
+                "quantity": 100,
+                "price": 230.0,
+            },
+        ],
+    },
+]
+
 BY_PATH: dict[str, Any] = {
     "/portfolio/holdings": STUB_HOLDINGS,
     "/portfolio/positions": STUB_POSITIONS,
     "/user/margins": STUB_MARGINS,
+    "/orders": STUB_ORDERS,
+    "/gtt/triggers": STUB_GTTS,
 }

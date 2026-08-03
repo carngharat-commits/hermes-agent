@@ -1,11 +1,13 @@
 # TradePulse
 
 Trading intelligence dashboard — Vite + React frontend, FastAPI backend for
-Zerodha Kite Connect authentication.
+Zerodha Kite Connect.
 
 This started life as a single 5,786-line React artifact. That file is now split
-across `src/`, and the first roadmap step (live Kite Connect login) is wired up
-against a real backend.
+across `src/`, and holdings, orders and GTT triggers are synced live from a
+connected Zerodha account. Everything else the UI renders is still the data
+bundled with the artifact — the Portfolio and Orders tabs say which you are
+looking at.
 
 ## Running it
 
@@ -28,7 +30,7 @@ Vite proxies `/api` to the backend on `127.0.0.1:8787`, so the browser stays
 same-origin and the session cookie set by the OAuth callback is kept.
 
 With no `KITE_API_KEY` / `KITE_API_SECRET` set the backend serves a **stub**:
-the redirect, the session cookie, logout, and a small set of fixture holdings
+the redirect, the session cookie, logout, and fixture holdings/orders/GTTs
 all work end to end against a fake account, so the whole path is testable
 before a Zerodha developer app exists. Stub responses are tagged `mode: "stub"`
 and the UI labels them as such — they are not a real book. Copy `.env.example`
@@ -43,7 +45,7 @@ to `.env` and fill it in to talk to the real thing.
 | `npm run typecheck` | Types only |
 | `npm run lint` | ESLint |
 | `node scripts/smoke.mjs` | Drives every tab + the Kite flow in Chromium (see header for setup) |
-| `cd server && pytest` | Backend tests (32, no network) |
+| `cd server && pytest` | Backend tests (54, no network) |
 
 ## Layout
 
@@ -56,8 +58,8 @@ src/
   lib/                      formatting (₹/$/%), seeded chart generation, constants
   data/                     the artifact's bundled snapshot: holdings, market,
                             signals, risk, brokers, calendar, roadmap — plus
-                            usePortfolio.ts, which merges live Kite holdings
-                            over the Zerodha slice of it
+                            usePortfolio.ts / useOrders.ts, which merge live
+                            Kite data over the Zerodha slice of it
   components/ui/            Card, Pill, Btn, Row, KV, Field, Stub, …
   components/shell/         Sidebar, TopBar, MarketTicker, Shell, nav map
   features/<area>/          one directory per tab — dashboard, portfolio,
@@ -67,8 +69,10 @@ src/
 server/                     FastAPI Kite Connect backend — see server/README.md
 ```
 
-98 modules were derived from the artifact; `api/kite.ts`,
-`features/accounts/KiteConnectCard.tsx`, `main.tsx`, and the config files are new.
+98 modules were derived from the artifact. Hand-written since: `api/kite.ts`,
+`data/useKiteResource.ts`, `data/usePortfolio.ts`, `data/useOrders.ts`,
+`components/ui/SourceBadge.tsx`, `features/accounts/KiteConnectCard.tsx`,
+`main.tsx`, and the config files.
 
 ### How the split was done
 
@@ -124,10 +128,23 @@ Two mapping decisions worth knowing (`server/tradepulse_server/mapping.py`):
 day after every buy; `pledged` is `collateral_quantity > 0`, since Kite reports
 pledging as a quantity split rather than a flag.
 
-**Step 3 — the rest of the surfaces.** Everything outside holdings is still
-bundled data: signals, opportunities, the intelligence feed, the calendar, the
-order book, risk scenarios. Orders are the natural next one — `ORDERS` and
-`GTT_ORDERS` in `src/data/trading.ts` map onto Kite's `/orders` and
-`/gtt/triggers`, and the passthrough route pattern is already there. Live
-quotes (`/quote`) would replace the static `MARKET` block and make `dayPct`
-move. Beyond that: multi-user sessions, and a real store behind `SessionStore`.
+**Step 3 — live orders and GTTs — done.** `GET /api/kite/orders` returns the
+order book and GTT triggers mapped to the shapes the Orders tab reads, and
+`data/useOrders.ts` merges them on the same rule as holdings. Two translations
+to know about: Kite reports a dozen order states and the UI understands three,
+so anything still in flight reads PENDING with Kite's own status kept on
+`kiteStatus`; and a two-leg GTT (stop-loss + target) splits into one row per
+leg, which is how the bundled snapshot already represented such pairs.
+
+Reads now go through a 15-second per-session cache (`server/cache.py`) — one
+page load fans out to five Kite endpoints, and Kite publishes per-endpoint
+rate limits.
+
+**Step 4 — what's left.** Live quotes (`/quote`) would replace the static
+`MARKET` block and make `dayPct` move; that one needs its own cache policy,
+since 15 seconds of staleness is fine for holdings and not for a ticker.
+Zerodha tokens expire around 6am IST and there's no refresh — you re-login.
+Signals, opportunities, the intelligence feed, the calendar and risk scenarios
+are synthetic and have no Kite equivalent; they need their own sources.
+Underneath all of it: multi-user sessions and a real store behind
+`SessionStore`.

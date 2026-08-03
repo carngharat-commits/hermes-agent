@@ -157,5 +157,5 @@ def test_unfixtured_paths_still_report_not_implemented():
     with pytest.raises(KiteError) as caught:
         import asyncio
 
-        asyncio.run(stub.get("/orders", "stub-access-token"))
+        asyncio.run(stub.get("/instruments", "stub-access-token"))
     assert caught.value.status == 501

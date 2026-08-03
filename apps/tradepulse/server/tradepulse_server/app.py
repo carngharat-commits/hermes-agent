@@ -15,9 +15,17 @@ from fastapi import Cookie, Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from .cache import TTLCache
 from .config import Settings, load_settings
 from .kite import KiteClient, KiteError, StubKiteClient
-from .mapping import map_holdings, map_margins, map_positions, summarize
+from .mapping import (
+    map_gtts,
+    map_holdings,
+    map_margins,
+    map_orders,
+    map_positions,
+    summarize,
+)
 from .sessions import SessionStore, issue_state, verify_state
 
 STATE_PARAM = "tp_state"
@@ -36,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = store
     app.state.kite = client
+    app.state.cache = TTLCache()
 
     # The Vite dev server proxies /api, so the browser is same-origin in the
     # normal setup. CORS is here only for the case where the UI is served from
@@ -70,6 +79,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ok": True,
             "mode": "live" if cfg.configured else "stub",
             "sessions": len(app.state.sessions),
+            "cache": {
+                "entries": len(app.state.cache),
+                "hits": app.state.cache.hits,
+                "misses": app.state.cache.misses,
+            },
         }
 
     @app.get("/api/kite/status")
@@ -155,6 +169,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = store.pop(session_cookie)
         if session is not None:
             await kite.invalidate(session.access_token)
+        # Cached reads outlive the session otherwise, and a later login
+        # reusing the id would serve the previous user's book.
+        app.state.cache.invalidate_prefix(f"{session_cookie}:")
         response = JSONResponse({"authenticated": False})
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
@@ -174,13 +191,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         session = store.get(session_cookie)
         if session is None:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "Not connected to Kite.", "error_type": "TokenException"},
-            )
+            return _unauthenticated()
 
-        raw_holdings = await kite.get("/portfolio/holdings", session.access_token)
-        holdings = map_holdings(raw_holdings)
+        holdings = map_holdings(
+            await _read(app, session_cookie, kite, session.access_token, "/portfolio/holdings")
+        )
 
         extras: dict[str, Any] = {"positions": [], "margins": {}}
         partial: list[str] = []
@@ -189,9 +204,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ("margins", "/user/margins", map_margins),
         ):
             try:
-                extras[label] = mapper(await kite.get(path, session.access_token))
+                raw = await _read(app, session_cookie, kite, session.access_token, path)
             except KiteError:
                 partial.append(label)
+                continue
+            extras[label] = mapper(raw)
 
         return {
             "mode": "live" if cfg.configured else "stub",
@@ -202,6 +219,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "margins": extras["margins"],
             "summary": summarize(holdings),
             # Names the UI can mention instead of silently showing less.
+            "unavailable": partial,
+        }
+
+    @app.get("/api/kite/orders")
+    async def orders(
+        cfg: Settings = Depends(current_settings),
+        store: SessionStore = Depends(current_store),
+        kite: KiteClient = Depends(current_client),
+        session_cookie: str | None = Cookie(default=None, alias="tradepulse_session"),
+    ) -> Any:
+        """The order book and GTT triggers, in the shapes the Orders tab reads.
+
+        Same split as /portfolio: the order book is load-bearing, GTTs are
+        best-effort — a Kite app without the GTT scope 403s on /gtt/triggers
+        and the order book should still render.
+        """
+        session = store.get(session_cookie)
+        if session is None:
+            return _unauthenticated()
+
+        order_rows = map_orders(
+            await _read(app, session_cookie, kite, session.access_token, "/orders")
+        )
+
+        gtts: list[Any] = []
+        partial: list[str] = []
+        try:
+            gtts = map_gtts(
+                await _read(app, session_cookie, kite, session.access_token, "/gtt/triggers")
+            )
+        except KiteError:
+            partial.append("gtt")
+
+        return {
+            "mode": "live" if cfg.configured else "stub",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "broker": "Zerodha",
+            "orders": order_rows,
+            "gtts": gtts,
             "unavailable": partial,
         }
 
@@ -216,6 +272,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _mount_passthrough(app, name, path, current_store, current_client)
 
     return app
+
+
+def _unauthenticated() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"error": "Not connected to Kite.", "error_type": "TokenException"},
+    )
+
+
+async def _read(app: FastAPI, session_id: str | None, kite: KiteClient,
+                access_token: str, path: str) -> Any:
+    """Cached Kite GET, scoped to the session so users never share a response."""
+    return await app.state.cache.fetch(
+        f"{session_id}:{path}", lambda: kite.get(path, access_token)
+    )
 
 
 def _mount_passthrough(app: FastAPI, name: str, kite_path: str, get_store, get_client) -> None:

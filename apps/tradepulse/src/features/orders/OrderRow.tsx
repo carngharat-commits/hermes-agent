@@ -21,7 +21,9 @@ export const OrderRow = ({ o }: any) => {
             <span className="text-[10px]" style={{ color: T.fgDim, ...FONT_MONO }}>· {o.broker}</span>
           </div>
           <div className="text-[10.5px] mt-1" style={{ color: T.fgMute, ...FONT_MONO }}>
-            {o.qty} × {o.segment === "US" ? "$" : "₹"}{o.price.toFixed(2)} · {o.when}
+            {/* A market order carries no price, and Kite reports that as 0 —
+                rendering "₹0.00" would claim it traded at nothing. */}
+            {o.qty} × {o.price > 0 ? `${o.segment === "US" ? "$" : "₹"}${o.price.toFixed(2)}` : "market"} · {o.when}
           </div>
           {o.reason && (
             <div className="text-[10.5px] mt-0.5" style={{ color: T.down, ...FONT_MONO }}>
