@@ -17,6 +17,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from .cache import TTLCache
 from .config import Settings, load_settings
+from .intel.agents import DETERMINISTIC_AGENTS, PENDING_AGENTS
+from .intel.service import IntelService
+from .intel.store import IntelStore
 from .kite import KiteClient, KiteError, StubKiteClient
 from .mapping import (
     map_gtts,
@@ -45,6 +48,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = store
     app.state.kite = client
     app.state.cache = TTLCache()
+    # The intelligence store outlives the process when a path is set; the
+    # default in-memory database keeps tests and demos self-contained.
+    app.state.intel = IntelService(store=IntelStore(settings.intel_db_path))
 
     # The Vite dev server proxies /api, so the browser is same-origin in the
     # normal setup. CORS is here only for the case where the UI is served from
@@ -260,6 +266,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "gtts": gtts,
             "unavailable": partial,
         }
+
+    # ---- intelligence layer ----------------------------------------------
+    # Additive: none of the existing routes change. The UI reads these to
+    # decorate screens it already renders.
+
+    @app.get("/api/intel/coverage")
+    async def intel_coverage() -> dict[str, Any]:
+        """Which symbols the valuation provider can answer for, and by whom."""
+        return {
+            "provider": app.state.intel.provider.name,
+            "symbols": app.state.intel.covered_symbols(),
+            "agents": {
+                "active": [a.name for a in DETERMINISTIC_AGENTS],
+                "pending": [
+                    {"agent": a.name, "needs": getattr(a, "requirement", "")}
+                    for a in PENDING_AGENTS
+                ],
+            },
+        }
+
+    @app.get("/api/intel/valuation/{symbol}")
+    async def intel_valuation(symbol: str, price: float = Query(0.0)) -> Any:
+        result = app.state.intel.valuation_for(symbol.upper(), price)
+        if result is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": f"No fundamentals for {symbol.upper()}.",
+                    "error_type": "NotCovered",
+                },
+            )
+        return {
+            "valuation": result,
+            "history": app.state.intel.valuation_history(symbol.upper()),
+        }
+
+    @app.post("/api/intel/enrich")
+    async def intel_enrich(payload: dict[str, Any]) -> dict[str, Any]:
+        """Batch valuation + current call for a watchlist or holdings table.
+
+        One request per screen rather than one per row — the watchlist would
+        otherwise fan out to dozens of calls on every render.
+        """
+        service = app.state.intel
+        rows = payload.get("symbols") or []
+        out = []
+        for row in rows:
+            symbol = str(row.get("sym", "")).upper()
+            if not symbol:
+                continue
+            price = float(row.get("ltp") or 0)
+            result = service.valuation_for(symbol, price)
+            current = service.store.current_recommendation(symbol)
+            out.append({
+                "sym": symbol,
+                "covered": result is not None,
+                "valuation": result,
+                "recommendation": current,
+            })
+        return {"provider": service.provider.name, "rows": out}
+
+    @app.post("/api/intel/recommend")
+    async def intel_recommend(payload: dict[str, Any]) -> Any:
+        symbol = str(payload.get("symbol", "")).upper()
+        if not symbol:
+            return JSONResponse(status_code=400, content={"error": "symbol is required"})
+        return app.state.intel.recommend(
+            symbol,
+            float(payload.get("price") or 0),
+            holdings=payload.get("holdings") or [],
+        )
+
+    @app.get("/api/intel/recommendations")
+    async def intel_recommendations(symbol: str | None = None, limit: int = 200) -> Any:
+        return {"recommendations": app.state.intel.history(symbol, limit)}
+
+    @app.get("/api/intel/performance")
+    async def intel_performance() -> Any:
+        return app.state.intel.performance()
+
+    @app.post("/api/intel/refresh")
+    async def intel_refresh(payload: dict[str, Any]) -> Any:
+        """Re-score every stored call against the prices supplied."""
+        prices = {
+            str(k).upper(): float(v) for k, v in (payload.get("prices") or {}).items()
+        }
+        return {"scored": app.state.intel.refresh_outcomes(prices)}
+
+    @app.post("/api/intel/learn")
+    async def intel_learn() -> Any:
+        return app.state.intel.learn()
 
     # ---- raw passthrough --------------------------------------------------
     # Unmapped Kite responses, kept for debugging a sync against what the API

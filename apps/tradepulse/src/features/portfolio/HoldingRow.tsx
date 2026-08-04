@@ -4,9 +4,10 @@
 import { FONT_MONO, T } from "@/theme/tokens";
 import { Pill } from "@/components/ui/Pill";
 import { Row } from "@/components/ui/Row";
+import { ValuationStrip } from "@/components/ui/ValuationStrip";
 import { inr, inrCompact, pct, usd } from "@/lib/format";
 
-export const HoldingRow = ({ h, segment }: any) => {
+export const HoldingRow = ({ h, segment, intel }: any) => {
   let displayName, displaySub, priceStr, valueStr, plStr, plPctVal;
   if (segment === "IN") {
     displayName = h.sym;
@@ -66,6 +67,7 @@ export const HoldingRow = ({ h, segment }: any) => {
           <div className="text-[10px] mt-0.5" style={{ color: up ? T.up : T.down, ...FONT_MONO }}>{pct(plPctVal, 2)}</div>
         </div>
       </div>
+      <ValuationStrip row={intel} />
     </Row>
   );
 };

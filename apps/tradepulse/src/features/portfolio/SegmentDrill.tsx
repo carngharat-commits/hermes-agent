@@ -7,10 +7,13 @@ import { ArrowLeft, Lock, Search, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { FONT_BODY, FONT_MONO, T } from "@/theme/tokens";
 import { HoldingRow } from "@/features/portfolio/HoldingRow";
+import { useIntel } from "@/data/useIntel";
 import { SortMenu } from "@/features/portfolio/SortMenu";
 import { cvOf, inrCompact, ivOf, pct } from "@/lib/format";
 
 export const SegmentDrill = ({ segment, holdings, onBack }: any) => {
+  // Intrinsic value for the rows on screen, in one batched request.
+  const { bySymbol } = useIntel(holdings.filter((h: any) => h.segment === segment));
   const meta = {
     IN: { label: "Indian Equities",  brands: ["All", "Zerodha", "ABML"] },
     US: { label: "US Equities",      brands: ["All", "INDmoney"] },
@@ -107,7 +110,7 @@ export const SegmentDrill = ({ segment, holdings, onBack }: any) => {
           <div className="p-8 text-center text-[13px]" style={{ color: T.fgMute }}>No matches</div>
         ) : (
           rows.map(h => (
-            <HoldingRow key={`${h.broker}-${h.sym || h.name}-${h.pledged ? "P" : "F"}`} h={h} segment={segment} />
+            <HoldingRow key={`${h.broker}-${h.sym || h.name}-${h.pledged ? "P" : "F"}`} h={h} segment={segment} intel={bySymbol[h.sym]} />
           ))
         )}
       </Card>

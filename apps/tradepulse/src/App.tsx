@@ -14,6 +14,7 @@ import { IntelligenceTab } from "@/features/intelligence/IntelligenceTab";
 import { OpportunitiesTab } from "@/features/opportunities/OpportunitiesTab";
 import { OrdersTab } from "@/features/orders/OrdersTab";
 import { PortfolioTab } from "@/features/portfolio/PortfolioTab";
+import { PerformanceTab } from "@/features/performance/PerformanceTab";
 import { RiskAuditTab } from "@/features/risk/RiskAuditTab";
 import { SegmentDrill } from "@/features/portfolio/SegmentDrill";
 import { SettingsTab } from "@/features/settings/SettingsTab";
@@ -100,6 +101,7 @@ export default function TradePulse() {
         {view === "opportunities" && <OpportunitiesTab />}
         {view === "calendar"      && <CalendarTab />}
         {view === "risk"          && <RiskAuditTab />}
+        {view === "performance"   && <PerformanceTab />}
         {view === "orders"        && <OrdersTab />}
         {view === "algo"          && <AlgoTab />}
         {view === "accounts"      && <AccountsTab />}
