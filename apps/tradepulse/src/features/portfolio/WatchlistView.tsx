@@ -49,7 +49,10 @@ export const WatchlistView = ({ watchlist, onAdd, onRemove, onBack }: any) => (
                   {w.note && <span className="text-[10px]" style={{ color: T.fgDim }}>· {w.note}</span>}
                 </div>
                 <div className="text-[10.5px] mt-0.5" style={{ color: T.fgMute, ...FONT_MONO }}>
-                  Qty {w.qty} · Target {w.segment === "US" ? "$" : "₹"}{w.target} · Now {w.segment === "US" ? "$" : "₹"}{w.ltp}
+                  {/* Quantity is optional on a watchlist — you don't own it. */}
+                  {w.qty > 0 && <>Qty {w.qty} · </>}
+                  Target {w.segment === "US" ? "$" : "₹"}{w.target}
+                  {w.ltp > 0 && <> · Now {w.segment === "US" ? "$" : "₹"}{w.ltp}</>}
                 </div>
               </div>
               <button onClick={() => onRemove(w.id)}

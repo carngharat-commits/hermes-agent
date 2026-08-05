@@ -2,7 +2,7 @@
    Only the module header and the `export` keyword are new. */
 
 import { useState, useRef } from "react";
-import { Camera, Check, Image as ImageIcon, RefreshCw, X } from "lucide-react";
+import { Camera, Check, Image as ImageIcon, X } from "lucide-react";
 
 import { Btn } from "@/components/ui/Btn";
 import { FONT_MONO, T } from "@/theme/tokens";
@@ -27,7 +27,6 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
   const [ltp, setLtp] = useState("");
   const [note, setNote] = useState("");
   const [photo, setPhoto] = useState(null);
-  const [parsing, setParsing] = useState(false);
   const fileRef = useRef(null);
 
   const brokers = BROKERS_BY_SEGMENT;
@@ -35,23 +34,44 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
   const handleFile = (file) => {
     if (!file) return;
     const r = new FileReader();
-    r.onload = () => {
-      setPhoto(r.result);
-      setParsing(true);
-      setTimeout(() => setParsing(false), 900);
-    };
+    // The photo is stored with the entry as a reference shot. It is NOT read:
+    // there is no OCR wired up, and the old code showed a "Reading photo..."
+    // spinner that extracted nothing, which made it look like the figures had
+    // been picked up automatically.
+    r.onload = () => setPhoto(r.result);
     r.readAsDataURL(file);
   };
 
-  const canSave = sym.trim() && qty && (mode === "holding" ? avg : target);
+  // A watchlist entry is something you do NOT own, so quantity is not part of
+  // it — only what you're waiting for. A holding is the opposite: quantity and
+  // cost are the whole point.
+  const missing = mode === "holding"
+    ? [
+        !sym.trim() && (segment === "MF" ? "fund name" : "symbol"),
+        !qty && (segment === "MF" ? "units" : "quantity"),
+        !avg && "average cost",
+      ].filter(Boolean)
+    : [
+        !sym.trim() && (segment === "MF" ? "fund name" : "symbol"),
+        !target && "target rate",
+      ].filter(Boolean);
+  const canSave = missing.length === 0;
+
+  const num = (value) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
   const submit = () => {
     if (!canSave) return;
     onSave({
       id: `${Date.now()}`, mode, segment, broker,
-      sym: sym.trim().toUpperCase(), qty: parseFloat(qty),
-      avg: parseFloat(avg || ltp || target),
-      target: parseFloat(target || ltp || avg),
-      ltp: parseFloat(ltp || target || avg),
+      // Fund names are mixed case; only tickers get upper-cased.
+      sym: segment === "MF" ? sym.trim() : sym.trim().toUpperCase(),
+      qty: num(qty),
+      avg: num(avg || ltp || target),
+      target: num(target || ltp || avg),
+      ltp: num(ltp || target || avg),
       note: note.trim(), photo,
     });
   };
@@ -84,7 +104,7 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
 
           {/* Photo */}
           <div>
-            <Label>Photo · optional but recommended</Label>
+            <Label>Reference photo · optional</Label>
             {photo ? (
               <div className="mt-1.5 relative">
                 <img src={photo} className="w-full max-h-[220px] object-cover rounded-lg" style={{ border: `1px solid ${T.border}` }} />
@@ -92,14 +112,10 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
                   className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
                   style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${T.border}` }}>
                   <X size={14} color="#fff" /></button>
-                {parsing && (
-                  <div className="absolute inset-0 flex items-center justify-center rounded-lg" style={{ background: "rgba(10,10,11,0.7)" }}>
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ background: T.card, border: `1px solid ${T.border}` }}>
-                      <RefreshCw size={12} color={T.primary} className="animate-spin" />
-                      <span className="text-[11px]" style={{ color: T.fg, ...FONT_MONO }}>Reading photo...</span>
-                    </div>
-                  </div>
-                )}
+                <div className="mt-1.5 text-[10.5px] leading-relaxed" style={{ color: T.fgMute }}>
+                  Saved with the entry as a reference shot. Figures aren't read
+                  from it — type them in below.
+                </div>
               </div>
             ) : (
               <div className="mt-1.5 grid grid-cols-2 gap-2">
@@ -160,7 +176,10 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Quantity</Label>
+              <Label>
+                {segment === "MF" ? "Units" : "Quantity"}
+                {mode !== "holding" && " · optional"}
+              </Label>
               <Input value={qty} onChange={setQty} placeholder="0" numeric />
             </div>
             {mode === "holding" ? (
@@ -179,6 +198,12 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
             <Label>Note · optional</Label>
             <Input value={note} onChange={setNote} placeholder="e.g. Breakout above 200-DMA" />
           </div>
+
+          {!canSave && (
+            <div className="text-[11px] text-center" style={{ color: T.warn, ...FONT_MONO }}>
+              Still need: {missing.join(" · ")}
+            </div>
+          )}
 
           <Btn onClick={submit} disabled={!canSave} className="w-full" size="lg">
             <Check size={14} /> Save {mode === "holding" ? "holding" : "to watchlist"}
