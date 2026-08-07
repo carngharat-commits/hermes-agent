@@ -26,6 +26,11 @@ NEUTRAL = {"HOLD"}
 # Below this a call is too young to score; returns over days are noise.
 MIN_DAYS_TO_JUDGE = 7
 
+# Below a full year, annualising inflates a short move into a headline it
+# cannot support — a 4-month +68% becomes "+385% CAGR". Report the
+# holding-period return instead and leave CAGR undefined.
+MIN_DAYS_TO_ANNUALISE = 365
+
 
 def _parse(stamp: str) -> datetime:
     value = datetime.fromisoformat(stamp)
@@ -54,10 +59,11 @@ def max_drawdown(prices: Iterable[float]) -> float:
 def annualised(total_return: float, days: int) -> float | None:
     """CAGR from a holding-period return.
 
-    Undefined under a week — annualising a three-day move produces numbers
-    that look like conviction and are arithmetic.
+    Undefined under a year. Annualising a short move produces numbers that
+    look like conviction and are arithmetic; the absolute return is reported
+    either way, so nothing is lost by withholding this one.
     """
-    if days < MIN_DAYS_TO_JUDGE:
+    if days < MIN_DAYS_TO_ANNUALISE:
         return None
     years = days / 365.25
     if years <= 0 or total_return <= -1:
@@ -190,7 +196,13 @@ def aggregate(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
     returns = [o["absolute_return"] for o in judged if o["absolute_return"] is not None]
     winners = [r for r in returns if r > 0]
 
-    wealth_created = sum(r for r in returns if r > 0)
+    # Only calls the engine itself judged right count as wealth it created. A
+    # stock running 68% *against* a HOLD is the market, not the AI, and
+    # counting it would let a wrong call inflate the headline.
+    wealth_created = sum(
+        o["absolute_return"] for o in correct
+        if (o["absolute_return"] or 0) > 0
+    )
     losses_avoided = sum(o["loss_avoided"] or 0 for o in judged)
 
     return {
@@ -207,7 +219,10 @@ def aggregate(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
         "losses_avoided": round(losses_avoided, 4),
         "capital_protected": round(sum(o["capital_protected"] or 0 for o in judged), 2),
         "opportunity_cost": round(sum(o["opportunity_cost"] or 0 for o in judged), 4),
-        "best": _extreme(judged, highest=True),
+        # Best is drawn from correct calls only — a call the engine scored
+        # INCORRECT must never be presented as its finest moment. Worst is
+        # drawn from everything judged: a big loss is a big loss.
+        "best": _extreme(correct, highest=True),
         "worst": _extreme(judged, highest=False),
     }
 

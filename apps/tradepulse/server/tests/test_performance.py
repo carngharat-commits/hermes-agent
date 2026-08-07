@@ -189,3 +189,49 @@ def test_by_action_splits_accuracy_per_call_type():
     assert split["BUY"]["count"] == 2
     assert split["BUY"]["accuracy"] == 0.5
     assert split["SELL"]["accuracy"] == 1.0
+
+
+# --- reporting honesty ----------------------------------------------------
+# Both found by simulate.py: a 120-day move annualised to +385%, and a call
+# judged INCORRECT being reported as the book's "best call" while its return
+# was counted as wealth the AI created.
+
+def test_returns_are_not_annualised_below_a_year():
+    """A 4-month move annualised reads like conviction and is arithmetic."""
+    assert annualised(0.68, days=120) is None
+    assert annualised(0.68, days=365) is not None
+
+
+def test_holding_period_return_survives_even_when_cagr_is_withheld():
+    out = evaluate(rec("BUY", days_ago=120), series([100, 168], 120), 168, now=NOW)
+    assert out["absolute_return"] == 0.68     # still reported
+    assert out["cagr"] is None                # just not annualised
+
+
+def mixed_book() -> list[dict]:
+    """A HOLD that was wrong while the stock ran, plus a correct SELL."""
+    return [
+        {**evaluate(rec("HOLD", rec_id=1, days_ago=120), series([100, 168], 120), 168, now=NOW),
+         "symbol": "RANAWAY", "action": "HOLD"},
+        {**evaluate(rec("SELL", price=900.0, rec_id=2, days_ago=120),
+                    series([900, 605], 120), 605, now=NOW),
+         "symbol": "FELL", "action": "SELL"},
+        {**evaluate(rec("BUY", rec_id=3, days_ago=120), series([100, 80], 120), 80, now=NOW),
+         "symbol": "SANK", "action": "BUY"},
+    ]
+
+
+def test_a_wrong_call_is_never_the_best_call():
+    book = mixed_book()
+    assert next(o for o in book if o["symbol"] == "RANAWAY")["verdict"] == "INCORRECT"
+    assert aggregate(book)["best"]["symbol"] == "FELL"
+
+
+def test_wealth_created_excludes_calls_the_engine_judged_wrong():
+    """The market moving in spite of the AI is not wealth the AI created."""
+    totals = aggregate(mixed_book())
+    assert totals["wealth_created"] == pytest.approx(0.328, abs=0.005)  # the SELL only
+
+
+def test_worst_call_still_reports_the_biggest_loss():
+    assert aggregate(mixed_book())["worst"]["symbol"] == "SANK"

@@ -301,9 +301,27 @@ def value(
 
     intrinsic, blend = _blend(dcf_per_share, epv_per_share)
 
+    # Net debt can exceed the modelled enterprise value, which drops equity
+    # value below zero. A negative per-share number must never reach a screen:
+    # it reads like a price, and the quality haircut would make a *worse*
+    # business look *less* negative. Clamp to zero and say why.
+    if intrinsic is not None and intrinsic <= 0:
+        blend = {
+            **blend,
+            "equity_wiped": True,
+            "modelled_value_per_share": round(intrinsic, 2),
+            "reason": (
+                "net debt exceeds the modelled enterprise value, so the equity "
+                "has no residual value on these numbers"
+            ),
+        }
+        intrinsic = 0.0
+
     margin_of_safety = None
     discount_premium = None
-    if intrinsic and intrinsic > 0 and market_price > 0:
+    # Explicit None checks: a clamped 0.0 is a real answer ("the equity has
+    # no modelled value"), and truthiness would silently turn it into None.
+    if intrinsic is not None and intrinsic > 0 and market_price > 0:
         margin_of_safety = (intrinsic - market_price) / intrinsic
         discount_premium = (market_price - intrinsic) / intrinsic
 
@@ -313,7 +331,7 @@ def value(
         "as_of": latest.period_end if latest else "",
         "fingerprint": fundamentals.fingerprint(),
         "provider": provider,
-        "intrinsic_value": round(intrinsic, 2) if intrinsic else None,
+        "intrinsic_value": round(intrinsic, 2) if intrinsic is not None else None,
         # Fair value is intrinsic haircut by quality: a fragile business is not
         # worth its model output.
         "fair_value": _fair_value(intrinsic, health["score"], quality["score"]),

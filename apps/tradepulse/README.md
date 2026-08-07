@@ -45,7 +45,9 @@ to `.env` and fill it in to talk to the real thing.
 | `npm run typecheck` | Types only |
 | `npm run lint` | ESLint |
 | `node scripts/smoke.mjs` | Drives every tab + the Kite flow in Chromium (see header for setup) |
-| `cd server && pytest` | Backend tests (54, no network) |
+| `node scripts/journeys.mjs` | Full add/edit/remove journeys with dummy data, every segment |
+| `cd server && pytest` | Backend tests (156, no network) |
+| `cd server && python simulate.py` | End-to-end simulation printing input and output at each stage |
 
 ## Layout
 

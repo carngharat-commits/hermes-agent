@@ -12,9 +12,29 @@ import type { EnrichedRow } from "@/api/intel";
  * as a real one.
  */
 export const ValuationStrip = ({ row }: { row?: EnrichedRow }) => {
-  if (!row?.covered || !row.valuation?.intrinsic_value) return null;
+  if (!row?.covered || row.valuation?.intrinsic_value == null) return null;
 
   const v = row.valuation;
+  const blend = (v.detail?.blend ?? {}) as Record<string, any>;
+
+  // Net debt above the modelled enterprise value: there is no residual equity
+  // value to quote. Saying so is the signal — hiding the row would bury it.
+  if (blend.equity_wiped) {
+    return (
+      <div
+        className="mt-2 pt-2 flex flex-wrap items-center gap-x-3 gap-y-1"
+        style={{ borderTop: `1px dashed ${T.border}` }}
+      >
+        <Pill tone="down" size="xs">no residual equity value</Pill>
+        <span className="text-[10px]" style={{ color: T.fgMute, ...FONT_MONO }}>
+          debt exceeds modelled enterprise value
+        </span>
+        <span className="text-[10px]" style={{ color: T.fgDim, ...FONT_MONO }}>
+          health {v.financial_health?.toFixed(0)} · quality {v.business_quality?.toFixed(0)}
+        </span>
+      </div>
+    );
+  }
   const margin = v.margin_of_safety ?? 0;
   const cheap = margin > 0;
   const action = row.recommendation?.action;

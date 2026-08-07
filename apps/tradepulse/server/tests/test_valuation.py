@@ -183,8 +183,10 @@ def test_fair_value_sits_at_or_below_intrinsic():
 
 
 def test_a_weak_business_gets_a_bigger_haircut():
+    """Compared on solvent businesses — a wiped one is covered separately."""
     strong = value(make(total_debt=20.0, cash=500.0, net_income=280.0), market_price=10.0)
-    weak = value(make(total_debt=3000.0, cash=5.0, net_income=8.0), market_price=10.0)
+    weak = value(make(total_debt=900.0, cash=50.0, net_income=40.0), market_price=10.0)
+    assert weak["intrinsic_value"] > 0 and strong["intrinsic_value"] > 0
     assert (weak["fair_value"] / weak["intrinsic_value"]
             < strong["fair_value"] / strong["intrinsic_value"])
 
@@ -211,9 +213,57 @@ def test_stub_provider_covers_the_demo_book():
 
 
 def test_every_stub_company_values_cleanly():
+    """Every covered name produces a usable answer — 0.0 for a wiped equity,
+    never None and never negative."""
     provider = StubFundamentalsProvider()
     for symbol in provider.covered():
         result = value(provider.fetch(symbol), market_price=100.0, provider="stub")
         assert result["intrinsic_value"] is not None, symbol
+        assert result["intrinsic_value"] >= 0, symbol
+        assert result["fair_value"] >= 0, symbol
         assert result["financial_health"] >= 0
         assert result["business_quality"] >= 0
+
+
+# --- equity wiped out by debt --------------------------------------------
+# Found by simulate.py: a leveraged cyclical whose net debt exceeds the
+# modelled enterprise value produced a NEGATIVE intrinsic value, and the
+# quality haircut then made a worse business look less negative.
+
+def levered() -> Fundamentals:
+    """Debt far above anything the cash flows can support."""
+    return Fundamentals(symbol="LEV", name="Levered", beta=1.5, annuals=tuple(
+        AnnualFinancials(
+            period_end=f"{2022 + i}-03-31", revenue=80000, net_income=2800,
+            operating_income=3780, free_cash_flow=1260, total_debt=60000,
+            cash=1500, total_equity=28000, total_assets=67000,
+            shares_outstanding=900,
+        ) for i in range(4)
+    ))
+
+
+def test_negative_equity_never_surfaces_as_a_negative_price():
+    result = value(levered(), market_price=45.0)
+    assert result["intrinsic_value"] == 0.0
+    assert result["fair_value"] == 0.0
+
+
+def test_wiped_equity_is_flagged_with_the_modelled_number_kept():
+    blend = value(levered(), market_price=45.0)["detail"]["blend"]
+    assert blend["equity_wiped"] is True
+    assert blend["modelled_value_per_share"] < 0      # the raw figure survives
+    assert "net debt exceeds" in blend["reason"]
+
+
+def test_margin_of_safety_is_undefined_when_the_equity_is_wiped():
+    """A percentage below zero is not a number anyone can act on."""
+    result = value(levered(), market_price=45.0)
+    assert result["margin_of_safety"] is None
+    assert result["discount_premium"] is None
+
+
+def test_a_worse_balance_sheet_never_scores_better():
+    """The haircut multiplies; on a negative it used to invert the ranking."""
+    solid = value(make(total_debt=10.0, cash=500.0), market_price=50.0)
+    broken = value(levered(), market_price=45.0)
+    assert broken["fair_value"] <= solid["fair_value"]
