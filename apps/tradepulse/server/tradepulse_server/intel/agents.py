@@ -17,6 +17,8 @@ and abstain until wired, so the consolidator already handles their absence.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -74,6 +76,13 @@ class Context:
 
 class Agent(Protocol):
     name: str
+    # Whether the agent is claiming the price will move in a direction.
+    # The learning loop scores hit rate by comparing an agent's sign against
+    # the price move, which only means something for agents that are actually
+    # forecasting. A risk brake says "don't add more", not "this will fall" —
+    # grading it that way drove it to the floor weight in a simulated year for
+    # being bad at a job it never claimed to do.
+    directional: bool
 
     def evaluate(self, context: Context) -> AgentView:
         ...
@@ -85,6 +94,7 @@ class FundamentalResearchAgent:
     """Reads the valuation: how far price sits from intrinsic, and on what quality."""
 
     name = "fundamental"
+    directional = True
 
     def evaluate(self, context: Context) -> AgentView:
         result = context.valuation
@@ -134,6 +144,7 @@ class TechnicalAnalysisAgent:
     """Trend and momentum from the recorded price path."""
 
     name = "technical"
+    directional = True
     MIN_MARKS = 20
 
     def evaluate(self, context: Context) -> AgentView:
@@ -181,6 +192,7 @@ class PortfolioRiskAgent:
     """Concentration: what this position already is inside the book."""
 
     name = "portfolio_risk"
+    directional = False
     HEAVY = 0.10   # a single name above 10% of the book
 
     def evaluate(self, context: Context) -> AgentView:
@@ -237,6 +249,7 @@ class _PendingAgent:
     """
 
     requirement = ""
+    directional = True
 
     def evaluate(self, context: Context) -> AgentView:
         return abstain(self.name, self.requirement)
@@ -285,22 +298,48 @@ def _stance(score: float) -> str:
 class IntelligenceLayer:
     """Runs the agents and collects their views.
 
+    Agents fan out concurrently. The three deterministic ones are fast enough
+    that it hardly matters, but news, sentiment and macro will each be a
+    network call or a model round-trip — run in sequence that is the latency
+    of the slowest three added together, and the ensemble stops being usable.
+
     An agent that raises is recorded as abstaining rather than taking the run
-    down — one specialist failing should cost its contribution, not the
-    recommendation.
+    down: one specialist failing should cost its contribution, not the
+    recommendation. Same for one that hangs — see `timeout`.
     """
 
-    def __init__(self, agents: tuple[Agent, ...] = ALL_AGENTS):
+    def __init__(self, agents: tuple[Agent, ...] = ALL_AGENTS, *, timeout: float = 20.0):
         self.agents = agents
+        self.timeout = timeout
+
+    async def _run_one(self, agent: Agent, context: Context) -> AgentView:
+        try:
+            result = agent.evaluate(context)
+            # Agents may be sync or async; a sync one must not block the loop
+            # while the others are in flight.
+            if inspect.isawaitable(result):
+                return await asyncio.wait_for(result, timeout=self.timeout)
+            return await asyncio.to_thread(lambda: result)
+        except asyncio.TimeoutError:
+            return abstain(agent.name, f"Agent timed out after {self.timeout:.0f}s.")
+        except Exception as exc:  # noqa: BLE001 - isolation is the point
+            return abstain(agent.name, f"Agent failed: {exc}")
+
+    async def gather_async(self, context: Context) -> list[AgentView]:
+        """Fan out to every agent, preserving declaration order in the result."""
+        return list(await asyncio.gather(
+            *(self._run_one(agent, context) for agent in self.agents)
+        ))
 
     def gather(self, context: Context) -> list[AgentView]:
-        views = []
-        for agent in self.agents:
-            try:
-                views.append(agent.evaluate(context))
-            except Exception as exc:  # noqa: BLE001 - isolation is the point
-                views.append(abstain(agent.name, f"Agent failed: {exc}"))
-        return views
+        """Synchronous entry point, for callers not already in a loop."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.gather_async(context))
+        raise RuntimeError(
+            "gather() called from inside an event loop; await gather_async() instead."
+        )
 
 
 def build_context(

@@ -20,6 +20,7 @@ from tradepulse_server.sessions import SessionStore, issue_state, verify_state
 STUB_SETTINGS = Settings(
     frontend_url="http://127.0.0.1:5273/",
     state_secret="test-secret",
+    intel_db_path=":memory:",
 )
 
 

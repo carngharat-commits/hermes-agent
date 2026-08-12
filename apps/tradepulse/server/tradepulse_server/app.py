@@ -7,6 +7,7 @@ server/README.md for what step 2 has to replace.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -18,6 +19,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from .cache import TTLCache
 from .config import Settings, load_settings
 from .intel.agents import DETERMINISTIC_AGENTS, PENDING_AGENTS
+from .intel.orchestrator import Orchestrator
+from .intel.scheduler import CycleScheduler
 from .intel.service import IntelService
 from .intel.store import IntelStore
 from .kite import KiteClient, KiteError, StubKiteClient
@@ -43,7 +46,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else StubKiteClient()
     )
 
-    app = FastAPI(title="TradePulse Kite backend", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        app.state.scheduler.start()
+        try:
+            yield
+        finally:
+            # Awaited, so a cycle in flight unwinds rather than being abandoned
+            # part-way through a write.
+            await app.state.scheduler.stop()
+
+    app = FastAPI(title="TradePulse Kite backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = store
     app.state.kite = client
@@ -51,6 +64,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The intelligence store outlives the process when a path is set; the
     # default in-memory database keeps tests and demos self-contained.
     app.state.intel = IntelService(store=IntelStore(settings.intel_db_path))
+    app.state.orchestrator = Orchestrator(app.state.intel)
+    # The scheduler reads prices and holdings at fire time. Nothing feeds it
+    # yet — a Kite session is per-browser, not per-process — so cycles run
+    # over stored marks until a background price source exists. Documented in
+    # server/README.md rather than faked.
+    app.state.scheduler = CycleScheduler(
+        app.state.orchestrator, settings.intel_cycle_seconds
+    )
 
     # The Vite dev server proxies /api, so the browser is same-origin in the
     # normal setup. CORS is here only for the case where the UI is served from
@@ -332,7 +353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         symbol = str(payload.get("symbol", "")).upper()
         if not symbol:
             return JSONResponse(status_code=400, content={"error": "symbol is required"})
-        return app.state.intel.recommend(
+        return await app.state.intel.recommend(
             symbol,
             float(payload.get("price") or 0),
             holdings=payload.get("holdings") or [],
@@ -357,6 +378,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/intel/learn")
     async def intel_learn() -> Any:
         return app.state.intel.learn()
+
+    @app.post("/api/intel/run")
+    async def intel_run(payload: dict[str, Any] | None = None) -> Any:
+        """Run one full cycle now, rather than waiting for the scheduler."""
+        payload = payload or {}
+        result = await app.state.orchestrator.run_cycle(
+            prices={str(k).upper(): float(v)
+                    for k, v in (payload.get("prices") or {}).items()},
+            holdings=payload.get("holdings") or [],
+            trigger="manual",
+        )
+        return result.as_dict()
+
+    @app.get("/api/intel/runs")
+    async def intel_runs(limit: int = 50) -> Any:
+        return {
+            "scheduler": app.state.scheduler.status(),
+            "runs": app.state.intel.store.runs(limit),
+        }
 
     # ---- raw passthrough --------------------------------------------------
     # Unmapped Kite responses, kept for debugging a sync against what the API

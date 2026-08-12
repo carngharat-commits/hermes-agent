@@ -14,6 +14,7 @@ a behaviour change shows up as a diff.
 
 from __future__ import annotations
 
+import asyncio
 import random
 import sys
 from datetime import datetime, timedelta, timezone
@@ -155,7 +156,7 @@ def stage_2_recommendation(service: IntelService) -> list[dict]:
     for symbol, _, price in COMPANIES:
         print(f"\n{symbol} @ {price:,.2f}")
         print(f"  INPUT holdings: {DUMMY_HOLDINGS}")
-        rec = service.recommend(symbol, price, holdings=DUMMY_HOLDINGS)
+        rec = asyncio.run(service.recommend(symbol, price, holdings=DUMMY_HOLDINGS))
         recommendations.append(rec)
 
         print("  AGENT VIEWS")

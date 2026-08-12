@@ -149,3 +149,19 @@ CREATE TABLE IF NOT EXISTS signal_weights (
 );
 
 CREATE INDEX IF NOT EXISTS idx_weights_agent ON signal_weights (agent, computed_at DESC);
+
+-- ------------------------------------------------------------------- runs
+-- Every orchestrated cycle, with its per-stage outcome. An unattended
+-- pipeline that leaves no trace cannot be debugged after the fact, and
+-- "the weights moved" is only meaningful next to "this is what ran".
+CREATE TABLE IF NOT EXISTS runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at      TEXT    NOT NULL,
+    finished_at     TEXT    NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    trigger         TEXT    NOT NULL,   -- scheduler | manual | test
+    ok              INTEGER NOT NULL,
+    stages          TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs (started_at DESC);

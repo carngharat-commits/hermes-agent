@@ -39,10 +39,14 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8787
 
-    # Where the intelligence store lives. ":memory:" keeps a run
-    # self-contained; point it at a file to keep recommendation history,
-    # which the performance and learning loops need to mean anything.
-    intel_db_path: str = ":memory:"
+    # Where the intelligence store lives. Defaults to a file: the whole point
+    # of the recommendation record is that it outlives the process, and an
+    # in-memory default silently made the performance and learning loops
+    # unable to accumulate anything. Tests pass ":memory:" explicitly.
+    intel_db_path: str = "data/tradepulse.db"
+
+    # How often the orchestrator runs a full cycle. 0 disables the scheduler.
+    intel_cycle_seconds: int = 900
 
     # Signs the OAuth state nonce. Generated per process when unset, which is
     # fine for a single dev instance but means restarts invalidate in-flight
@@ -74,7 +78,8 @@ def load_settings() -> Settings:
         cookie_samesite=os.environ.get("TRADEPULSE_COOKIE_SAMESITE", "lax"),
         host=os.environ.get("TRADEPULSE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TRADEPULSE_PORT", "8787")),
-        intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", ":memory:").strip(),
+        intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db").strip(),
+        intel_cycle_seconds=int(os.environ.get("TRADEPULSE_CYCLE_SECONDS", "900")),
         state_secret=os.environ.get("TRADEPULSE_STATE_SECRET", "")
         or secrets.token_urlsafe(32),
     )

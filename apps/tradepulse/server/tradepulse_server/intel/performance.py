@@ -189,10 +189,36 @@ def _verdict(action: str, move: float, holding_days: int) -> str:
     return "CORRECT" if _was_right(action, move) else "INCORRECT"
 
 
+def current_only(outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One outcome per symbol — the newest, dropping superseded ones.
+
+    Money-like totals have to be computed over this. A year of monthly cycles
+    leaves a dozen recommendations per symbol, each scored against the same
+    rally, and summing them counts one price move a dozen times: in a
+    12-cycle simulation that turned nine correct calls into "+205% wealth
+    created". Accuracy and win rate still read the full history, because
+    there every call is a separate prediction and the repetition is the
+    track record.
+    """
+    newest: dict[str, dict[str, Any]] = {}
+    for outcome in outcomes:
+        symbol = outcome.get("symbol") or ""
+        seen = newest.get(symbol)
+        if seen is None or outcome["recommendation_id"] > seen["recommendation_id"]:
+            newest[symbol] = outcome
+    return list(newest.values())
+
+
 def aggregate(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
     """Book-level totals — the numbers the AI Performance dashboard shows."""
     judged = [o for o in outcomes if o["verdict"] in {"CORRECT", "INCORRECT"}]
     correct = [o for o in judged if o["verdict"] == "CORRECT"]
+    # Deduplicated view for anything that sums. Dedupe *after* filtering to
+    # judged rows: the newest call on a symbol is usually the current
+    # cycle's and still OPEN, so picking it first and filtering second
+    # empties the totals entirely.
+    live = current_only(judged)
+    live_correct = [o for o in live if o["verdict"] == "CORRECT"]
     returns = [o["absolute_return"] for o in judged if o["absolute_return"] is not None]
     winners = [r for r in returns if r > 0]
 
@@ -200,10 +226,10 @@ def aggregate(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
     # stock running 68% *against* a HOLD is the market, not the AI, and
     # counting it would let a wrong call inflate the headline.
     wealth_created = sum(
-        o["absolute_return"] for o in correct
+        o["absolute_return"] for o in live_correct
         if (o["absolute_return"] or 0) > 0
     )
-    losses_avoided = sum(o["loss_avoided"] or 0 for o in judged)
+    losses_avoided = sum(o["loss_avoided"] or 0 for o in live)
 
     return {
         "total_recommendations": len(outcomes),
@@ -212,13 +238,15 @@ def aggregate(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
         "accuracy": round(len(correct) / len(judged), 4) if judged else None,
         "win_rate": round(len(winners) / len(returns), 4) if returns else None,
         "average_return": round(sum(returns) / len(returns), 4) if returns else None,
-        "average_loss_avoided": round(losses_avoided / len(judged), 4) if judged else None,
+        "average_loss_avoided": round(losses_avoided / len(live), 4) if live else None,
         # Expressed per unit of capital committed, not in rupees: position
         # sizing is the user's, and inventing one would fabricate the headline.
         "wealth_created": round(wealth_created, 4),
         "losses_avoided": round(losses_avoided, 4),
-        "capital_protected": round(sum(o["capital_protected"] or 0 for o in judged), 2),
-        "opportunity_cost": round(sum(o["opportunity_cost"] or 0 for o in judged), 4),
+        "capital_protected": round(sum(o["capital_protected"] or 0 for o in live), 2),
+        "opportunity_cost": round(sum(o["opportunity_cost"] or 0 for o in live), 4),
+        # How many symbols the summed figures above actually cover.
+        "positions_counted": len(live),
         # Best is drawn from correct calls only — a call the engine scored
         # INCORRECT must never be presented as its finest moment. Worst is
         # drawn from everything judged: a big loss is a big loss.

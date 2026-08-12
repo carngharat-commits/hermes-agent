@@ -8,7 +8,13 @@ from fastapi.testclient import TestClient
 from tradepulse_server.app import create_app
 from tradepulse_server.config import Settings
 
-SETTINGS = Settings(frontend_url="http://127.0.0.1:5273/", state_secret="test-secret")
+SETTINGS = Settings(
+    frontend_url="http://127.0.0.1:5273/",
+    state_secret="test-secret",
+    # Each test app gets its own throwaway store; the production default is
+    # a file, and sharing it across tests leaks state between them.
+    intel_db_path=":memory:",
+)
 
 
 @pytest.fixture

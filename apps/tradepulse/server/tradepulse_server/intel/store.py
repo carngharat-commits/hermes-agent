@@ -302,6 +302,30 @@ class IntelStore:
         ).fetchall()
         return [_row(r) for r in rows]
 
+    # -- run history --------------------------------------------------------
+
+    def record_run(self, run: dict[str, Any]) -> int:
+        with self.conn as conn:
+            cursor = conn.execute(
+                "INSERT INTO runs (started_at, finished_at, duration_ms, trigger, "
+                "ok, stages) VALUES (?, ?, ?, ?, ?, ?)",
+                (run["started_at"], run["finished_at"], run["duration_ms"],
+                 run["trigger"], 1 if run["ok"] else 0, json.dumps(run["stages"])),
+            )
+            return int(cursor.lastrowid)
+
+    def runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM runs ORDER BY started_at DESC, id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out = []
+        for row in rows:
+            record = dict(row)
+            record["ok"] = bool(record["ok"])
+            record["stages"] = json.loads(record["stages"])
+            out.append(record)
+        return out
+
     # -- learned weights ----------------------------------------------------
 
     def record_weights(self, weights: Iterable[dict[str, Any]]) -> int:

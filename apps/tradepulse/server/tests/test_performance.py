@@ -10,6 +10,7 @@ from tradepulse_server.intel.performance import (
     aggregate,
     annualised,
     by_action,
+    current_only,
     evaluate,
     max_drawdown,
 )
@@ -235,3 +236,67 @@ def test_wealth_created_excludes_calls_the_engine_judged_wrong():
 
 def test_worst_call_still_reports_the_biggest_loss():
     assert aggregate(mixed_book())["worst"]["symbol"] == "SANK"
+
+
+# --- summed totals must not double-count ----------------------------------
+# Found by simulate_automation.py: twelve monthly cycles leave a dozen
+# recommendations per symbol, each scored against the same rally. Summing
+# them turned nine correct calls into "+205% wealth created".
+
+def repeated_calls_on_one_symbol() -> list[dict]:
+    """Three successive BUYs on the same stock through one long rally."""
+    return [
+        {**evaluate(rec("BUY", price=100.0, rec_id=1, days_ago=120),
+                    series([100, 200], 120), 200, now=NOW),
+         "symbol": "SAME", "action": "BUY"},
+        {**evaluate(rec("BUY", price=140.0, rec_id=2, days_ago=90),
+                    series([140, 200], 90), 200, now=NOW),
+         "symbol": "SAME", "action": "BUY"},
+        {**evaluate(rec("BUY", price=170.0, rec_id=3, days_ago=60),
+                    series([170, 200], 60), 200, now=NOW),
+         "symbol": "SAME", "action": "BUY"},
+    ]
+
+
+def test_current_only_keeps_the_newest_call_per_symbol():
+    live = current_only(repeated_calls_on_one_symbol())
+    assert len(live) == 1
+    assert live[0]["recommendation_id"] == 3
+
+
+def test_wealth_created_counts_one_rally_once():
+    """Not 1.00 + 0.43 + 0.18 — the same move, three times."""
+    totals = aggregate(repeated_calls_on_one_symbol())
+    assert totals["wealth_created"] == pytest.approx(0.176, abs=0.005)
+    assert totals["positions_counted"] == 1
+
+
+def test_accuracy_still_reads_the_whole_track_record():
+    """Every call was a separate prediction; the repetition is the record."""
+    totals = aggregate(repeated_calls_on_one_symbol())
+    assert totals["judged"] == 3
+    assert totals["accuracy"] == 1.0
+
+
+def test_summed_totals_scale_with_symbols_not_with_cycles():
+    one_symbol = aggregate(repeated_calls_on_one_symbol())["wealth_created"]
+    two_symbols = aggregate(repeated_calls_on_one_symbol() + [
+        {**evaluate(rec("BUY", price=170.0, rec_id=9, days_ago=60),
+                    series([170, 200], 60), 200, now=NOW),
+         "symbol": "OTHER", "action": "BUY"},
+    ])["wealth_created"]
+    assert two_symbols == pytest.approx(one_symbol * 2, abs=0.01)
+
+
+def test_dedup_does_not_empty_the_totals_when_the_newest_call_is_still_open():
+    """The newest call on a symbol is usually this cycle's and unjudged; if
+    dedup runs before the judged filter, every summed total reads zero."""
+    book = repeated_calls_on_one_symbol() + [
+        {**evaluate(rec("BUY", price=200.0, rec_id=99, days_ago=1),
+                    series([200, 205], 1), 205, now=NOW),
+         "symbol": "SAME", "action": "BUY"},
+    ]
+    totals = aggregate(book)
+    assert totals["open"] == 1
+    assert totals["positions_counted"] == 1
+    assert totals["wealth_created"] > 0

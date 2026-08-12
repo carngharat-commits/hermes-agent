@@ -57,7 +57,7 @@ class IntelService:
 
     # -- recommendations ----------------------------------------------------
 
-    def recommend(
+    async def recommend(
         self,
         symbol: str,
         market_price: float,
@@ -78,7 +78,7 @@ class IntelService:
             price_history=history,
             holdings=holdings or [],
         )
-        views = self.layer.gather(context)
+        views = await self.layer.gather_async(context)
 
         weights = {a: w["weight"] for a, w in self.store.latest_weights().items()}
         recommendation = consolidate(

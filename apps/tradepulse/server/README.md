@@ -8,7 +8,7 @@ Kite Connect and holding the access token server-side.
 ```bash
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 PYTHONPATH=. ./.venv/bin/python -m tradepulse_server     # 127.0.0.1:8787
-./.venv/bin/python -m pytest                             # 14 tests, no network
+./.venv/bin/python -m pytest                             # 186 tests, no network
 ```
 
 Configuration is entirely environmental — see `../.env.example`. With
@@ -51,6 +51,34 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 Failures on the callback don't render an error page — they redirect back to the
 UI with `?kite_error=<reason>`, which `KiteConnectCard` turns into a banner.
 
+## Automation
+
+`orchestrator.py` runs one cycle: **prices → valuations → recommendations →
+outcomes → learning**. The order is load-bearing — valuations and the technical
+agent read prices, outcomes score against the marks just recorded, learning
+reads the outcomes. Each stage is idempotent (a retry after a crash is safe),
+isolated (a failing stage is recorded and the cycle carries on), and audited to
+the `runs` table.
+
+`scheduler.py` drives it on `TRADEPULSE_CYCLE_SECONDS` (0 disables). The first
+cycle waits one interval so a slow pipeline can never block startup, and
+shutdown awaits the task rather than abandoning a cycle mid-write. A failing
+cycle backs off exponentially instead of hammering a broken dependency.
+
+Agents fan out concurrently with a per-agent timeout. Today the three
+deterministic ones return in microseconds, but news, sentiment and macro will
+each be a network call or a model round-trip, and serial execution would make
+the ensemble's latency the sum of all of them.
+
+**The scheduler has no price source.** A Kite session is per-browser, not
+per-process, so unattended cycles run over stored marks. Until a background
+price feed exists, `POST /api/intel/run` with prices is the real trigger.
+
+| Route | Purpose |
+| --- | --- |
+| `POST /api/intel/run` | Run one cycle now |
+| `GET /api/intel/runs` | Run history + scheduler status |
+
 ## Mapping (`mapping.py`)
 
 Pure functions, dicts in and dicts out, turning Kite's vocabulary into the
@@ -83,6 +111,8 @@ matter. Anything that does — live quotes — will want its own path.
 
 ## What's still a stub
 
+- **No price feed behind the scheduler** (above), so automated cycles
+  re-score against stored marks rather than fresh ones.
 - **Session storage is in-process memory** (`sessions.py`). A restart logs
   everyone out and a second worker shares nothing with the first. Back
   `SessionStore` with Redis or a table before this runs anywhere real — the

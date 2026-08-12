@@ -26,6 +26,12 @@ MAX_WEIGHT = 1.60
 LEARNING_RATE = 0.35     # how far toward the evidence a weight moves per run
 
 
+# Agents that do not forecast a direction. Their contribution is real but it
+# is not a prediction, so comparing their sign against the price move measures
+# nothing — see the `directional` flag on the Agent protocol.
+NON_DIRECTIONAL = {"portfolio_risk"}
+
+
 def review(recommendation: dict[str, Any], outcome: dict[str, Any],
            agent_outputs: list[dict[str, Any]]) -> dict[str, Any]:
     """What worked, what failed, and why — for one completed recommendation."""
@@ -35,7 +41,7 @@ def review(recommendation: dict[str, Any], outcome: dict[str, Any],
     worked, failed = [], []
     for output in agent_outputs:
         score = output.get("score")
-        if score is None:
+        if score is None or output["agent"] in NON_DIRECTIONAL:
             continue
         # An agent was right if its direction matched the price move.
         agreed = (score > 0 and move > 0) or (score < 0 and move < 0)

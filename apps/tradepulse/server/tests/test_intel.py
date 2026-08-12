@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -311,10 +312,10 @@ def test_unchanged_financials_reuse_the_stored_valuation(service: IntelService):
 
 
 def test_recommend_persists_the_call_and_its_agent_views(service: IntelService):
-    result = service.recommend("RELIANCE", 1275.90, holdings=[
+    result = asyncio.run(service.recommend("RELIANCE", 1275.90, holdings=[
         {"sym": "RELIANCE", "qty": 10, "ltp": 1275.90},
         {"sym": "TCS", "qty": 50, "ltp": 2000.0},
-    ])
+    ]))
     assert result["id"]
     assert result["action"] in {"BUY", "HOLD", "REDUCE", "SELL", "AVOID"}
     assert result["reasoning"].startswith(result["action"])
@@ -325,7 +326,7 @@ def test_recommend_persists_the_call_and_its_agent_views(service: IntelService):
 
 
 def test_pending_agents_are_recorded_as_abstaining(service: IntelService):
-    result = service.recommend("RELIANCE", 1275.90)
+    result = asyncio.run(service.recommend("RELIANCE", 1275.90))
     abstained = {a["agent"] for a in result["evidence"]["abstained"]}
     assert {"news", "sentiment", "macro"} <= abstained
 
@@ -334,7 +335,7 @@ def test_full_loop_recommend_score_then_learn(service: IntelService):
     older = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
 
     for symbol, price in (("RELIANCE", 1000.0), ("TCS", 2000.0), ("TITAN", 3000.0)):
-        rec = service.recommend(symbol, price)
+        rec = asyncio.run(service.recommend(symbol, price))
         # Backdate so the outcome engine will judge rather than hold it open.
         with service.store.conn as conn:
             conn.execute("UPDATE recommendations SET created_at = ? WHERE id = ?",
@@ -351,3 +352,106 @@ def test_full_loop_recommend_score_then_learn(service: IntelService):
     assert len(lesson["reviews"]) == 3
     assert lesson["weights"]
     assert service.store.latest_weights()
+
+
+# --- the agent layer runs concurrently ------------------------------------
+
+def test_agents_run_in_parallel_not_one_after_another():
+    """Once news/sentiment/macro are network calls, serial execution is the
+    latency of all of them added together."""
+    import time
+
+    class Slow:
+        def __init__(self, name):
+            self.name = name
+
+        async def evaluate(self, context):
+            await asyncio.sleep(0.2)
+            return AgentView(agent=self.name, stance="NEUTRAL", score=0.0,
+                             confidence=50.0, summary="slept")
+
+    layer = IntelligenceLayer(tuple(Slow(f"a{i}") for i in range(5)))
+    started = time.monotonic()
+    views = asyncio.run(layer.gather_async(Context(symbol="X", market_price=1)))
+    elapsed = time.monotonic() - started
+
+    assert len(views) == 5
+    assert elapsed < 0.6, f"five 0.2s agents took {elapsed:.2f}s — they ran serially"
+
+
+def test_a_hanging_agent_is_dropped_rather_than_stalling_the_ensemble():
+    class Hanging:
+        name = "hangs"
+
+        async def evaluate(self, context):
+            await asyncio.sleep(30)
+
+    class Quick:
+        name = "quick"
+
+        def evaluate(self, context):
+            return AgentView(agent="quick", stance="BULLISH", score=50.0,
+                             confidence=80.0, summary="fine")
+
+    layer = IntelligenceLayer((Hanging(), Quick()), timeout=0.2)
+    views = asyncio.run(layer.gather_async(Context(symbol="X", market_price=1)))
+
+    assert views[0].abstained and "timed out" in views[0].summary
+    assert views[1].score == 50.0     # the healthy agent still contributed
+
+
+def test_views_come_back_in_declaration_order():
+    """The consolidator and the stored evidence both read positionally."""
+    class Named:
+        def __init__(self, name, delay):
+            self.name, self.delay = name, delay
+
+        async def evaluate(self, context):
+            await asyncio.sleep(self.delay)
+            return AgentView(agent=self.name, stance="NEUTRAL", score=0.0,
+                             confidence=10.0, summary="")
+
+    layer = IntelligenceLayer((Named("first", 0.15), Named("second", 0.01)))
+    views = asyncio.run(layer.gather_async(Context(symbol="X", market_price=1)))
+    assert [v.agent for v in views] == ["first", "second"]
+
+
+def test_sync_gather_refuses_to_run_inside_a_loop():
+    """Calling it from a route would block the loop; the error says what to do."""
+    async def inner():
+        IntelligenceLayer(()).gather(Context(symbol="X", market_price=1))
+
+    with pytest.raises(RuntimeError, match="gather_async"):
+        asyncio.run(inner())
+
+
+# --- the learning loop only grades forecasts -------------------------------
+# Found by simulate_automation.py: portfolio_risk scored a 15% hit rate over a
+# simulated year and was driven to the floor weight. It never forecasts a
+# direction — it says "don't add more" — so its sign against the price move
+# measures nothing.
+
+def test_a_non_directional_agent_is_not_graded_on_direction():
+    result = review_of({"fundamental": 60.0, "portfolio_risk": -80.0},
+                       move=0.2, verdict="CORRECT")
+    graded = {w["agent"] for w in result["what_worked"]} | {
+        f["agent"] for f in result["what_failed"]}
+    assert "portfolio_risk" not in graded
+    assert "fundamental" in graded
+
+
+def test_a_non_directional_agent_keeps_its_default_weight():
+    reviews = [review_of({"fundamental": 50.0, "portfolio_risk": -90.0}, 0.1, "CORRECT")] * 15
+    weights = {w["agent"]: w for w in learning.recompute_weights(reviews)}
+    assert weights["portfolio_risk"]["weight"] == 0.8      # untouched default
+    assert weights["portfolio_risk"]["sample_size"] == 0
+    assert weights["fundamental"]["weight"] > 1.0          # graded and rewarded
+
+
+def test_agents_declare_whether_they_forecast():
+    from tradepulse_server.intel.agents import (
+        FundamentalResearchAgent, PortfolioRiskAgent, TechnicalAnalysisAgent,
+    )
+    assert FundamentalResearchAgent.directional is True
+    assert TechnicalAnalysisAgent.directional is True
+    assert PortfolioRiskAgent.directional is False
