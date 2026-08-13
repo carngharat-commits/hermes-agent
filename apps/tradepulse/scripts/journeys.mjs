@@ -46,6 +46,8 @@ async function main() {
   await journeyModeSwitchInSheet();
   await journeyRemoveFromWatchlist();
   await journeyPhotoIsNotClaimedToBeRead();
+  await journeyEveryAICallIsExplainable();
+  await journeyWatchlistShowsIntelligenceOnlyWhenPriced();
 
   check("no uncaught page errors during any journey", crashes.length === 0,
     crashes.join("\n         "));
@@ -113,7 +115,14 @@ async function nameField(segment) {
 }
 
 async function missingHint() {
-  return page.locator("text=/Still need:/").textContent().catch(() => null);
+  // Short timeout on purpose. This is called to *describe* a failure, and the
+  // hint is absent in the passing case — on Playwright's 30s default that is
+  // half a minute burnt per successful check, which made a green run look like
+  // a hung one and cost several minutes an execution.
+  return page
+    .locator("text=/Still need:/")
+    .textContent({ timeout: 400 })
+    .catch(() => null);
 }
 
 async function saveButton() {
@@ -305,6 +314,121 @@ async function journeyPhotoIsNotClaimedToBeRead() {
   check("photo is described as a reference shot",
     /reference photo/i.test(sheet), sheet.slice(0, 200));
   await closeSheet();
+}
+
+// The spec's hard rule: users should never see an unexplained AI decision.
+// A bare `AI HOLD 32%` pill with nowhere to click was exactly that, and it was
+// worst on the calls that most need explaining — the ones a portfolio brake
+// pulled back from a BUY.
+//
+// Needs the backend running with at least one recommendation on file for a
+// held, covered symbol. With no intelligence layer reachable the strip renders
+// nothing at all, which is correct behaviour, so this journey skips rather
+// than failing.
+async function journeyEveryAICallIsExplainable() {
+  console.log("\n— every AI call can be opened and explained —");
+  await openTab("Portfolio");
+  await page.getByText("Indian Equities").first().click();
+  await page.waitForTimeout(1500);
+
+  const links = page.getByText("why?", { exact: true });
+  const count = await links.count();
+  if (count === 0) {
+    console.log("       skipped — no AI calls on file (backend not seeded)");
+    return;
+  }
+  check("a covered holding shows an AI call", /AI (BUY|HOLD|REDUCE|SELL|AVOID)/
+    .test(await mainText()));
+
+  // Prefer a call a brake actually held back; that branch carries the
+  // counterfactual and is the one most easily got wrong.
+  let drawer = "";
+  for (let i = 0; i < count; i++) {
+    await links.nth(i).scrollIntoViewIfNeeded();
+    await links.nth(i).click();
+    await page.waitForTimeout(500);
+    drawer = await page.locator("body").innerText();
+    if (/held back by portfolio exposure/i.test(drawer)) break;
+    if (i < count - 1) {
+      await page.getByRole("button", { name: "Close" }).first().click();
+      await page.waitForTimeout(250);
+      drawer = "";
+    }
+  }
+  check("the explanation drawer opens", /why the AI said this/i.test(drawer),
+    drawer.slice(0, 200));
+  check("it shows how the score was reached", /How the score was reached/i.test(drawer));
+  check("it names the individual agents", /fundamental/i.test(drawer));
+  check("it quotes an agent's own reasoning", /intrinsic value/i.test(drawer));
+  check("it separates forecasts from portfolio brakes",
+    /What the forecasters found/i.test(drawer) && /What your portfolio says/i.test(drawer));
+  check("it states what was not considered, and why",
+    /Not considered/i.test(drawer)
+      && /news feed|language model|macro series/i.test(drawer));
+  check("it shows provenance for the call", /Provenance/i.test(drawer)
+    && /never overwritten/i.test(drawer));
+
+  if (/held back by portfolio exposure/i.test(drawer)) {
+    check("a brake that moved the score is explained",
+      /not a reason to sell/i.test(drawer));
+    // The counterfactual must only appear when the band actually changed.
+    // Saying "would have been a BUY" on a call that IS a BUY reads as a
+    // downgrade that never happened.
+    const claimsChange = /Without it this would have been a\s+(BUY|HOLD|REDUCE|SELL)/
+      .exec(drawer);
+    const action = /\b(BUY|HOLD|REDUCE|SELL|AVOID)\s+\d+%/.exec(drawer);
+    check("no counterfactual that restates the same call",
+      !claimsChange || !action || claimsChange[1] !== action[1],
+      `claimed ${claimsChange?.[1]} vs actual ${action?.[1]}`);
+  }
+
+  await page.getByRole("button", { name: "Close" }).first().click();
+  await page.waitForTimeout(350);
+  check("the drawer closes again",
+    !/why the AI said this/i.test(await page.locator("body").innerText()));
+}
+
+// A watchlist row carries a target — what the user hopes to pay — and the add
+// sheet backfills `ltp` from it when no market price is given. Valuing against
+// that and calling the gap a discount to market would be a fabricated number,
+// so the strip must appear for a priced row and stay away from an unpriced one.
+//
+// TITAN is used because it is one of the stub provider's covered symbols; an
+// uncovered ticker renders nothing either way and would prove nothing.
+async function journeyWatchlistShowsIntelligenceOnlyWhenPriced() {
+  console.log("\n— watchlist intelligence appears only where there is a price —");
+
+  // First: target only, no market price.
+  await openAddSheet("watchlist");
+  await pickSegment("IN");
+  await (await nameField("IN")).fill("TITAN");
+  await page.getByPlaceholder("0.00").nth(0).fill("2900");
+  await (await saveButton()).click();
+  await page.waitForTimeout(1400);
+
+  let list = await mainText();
+  check("target-only row is saved", list.includes("TITAN"), list.slice(0, 200));
+  const titanBlock = list.slice(list.indexOf("TITAN"), list.indexOf("TITAN") + 320);
+  check("target-only row claims no margin of safety",
+    !/MOS|% over/i.test(titanBlock), titanBlock);
+
+  // Then: the same symbol with a market price the user actually entered.
+  await page.getByRole("button", { name: /Add/ }).first().click();
+  await page.waitForTimeout(500);
+  await pickSegment("IN");
+  await (await nameField("IN")).fill("TITAN");
+  await page.getByPlaceholder("0.00").nth(0).fill("2900");
+  await page.getByPlaceholder("0.00").nth(1).fill("3400");   // current price
+  await (await saveButton()).click();
+  await page.waitForTimeout(1800);
+
+  list = await mainText();
+  const priced = list.slice(0, list.indexOf("TITAN") + 420);
+  check("priced row shows an intrinsic value", /Intrinsic/i.test(priced), priced.slice(0, 300));
+  check("priced row shows the margin against market", /MOS|% over/i.test(priced),
+    priced.slice(0, 300));
+  check("priced row compares the target to intrinsic value",
+    /your target is/i.test(priced), priced.slice(0, 400));
 }
 
 function report() {

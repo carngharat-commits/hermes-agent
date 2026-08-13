@@ -72,6 +72,11 @@ export const AddSheet = ({ onClose, onSave, defaultMode = "watchlist" }: any) =>
       avg: num(avg || ltp || target),
       target: num(target || ltp || avg),
       ltp: num(ltp || target || avg),
+      // Whether `ltp` is a price the user actually observed, or was filled in
+      // from the target as a placeholder. The valuation strip needs to know:
+      // comparing intrinsic value against a target price and labelling it a
+      // discount to market would be a made-up number.
+      ltpEntered: num(ltp) > 0,
       note: note.trim(), photo,
     });
   };

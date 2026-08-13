@@ -105,13 +105,24 @@ class Orchestrator:
         prices: dict[str, float] | None = None,
         holdings: list[dict[str, Any]] | None = None,
         trigger: str = "manual",
+        observed_at: str | None = None,
     ) -> CycleResult:
-        """One full pass. Safe to call repeatedly; safe to call concurrently."""
+        """One full pass. Safe to call repeatedly; safe to call concurrently.
+
+        `observed_at` is when these prices were seen. It defaults to now, which
+        is right for a live cycle. A caller replaying history — a backtest, or
+        the simulation harness — passes the timestamp the marks belong to, so
+        they land on the historical timeline instead of collapsing onto the
+        wall clock. Marks are keyed by `(symbol, observed_at)` at second
+        resolution, so without it a replay's cycles merge into each other
+        depending on how fast the machine runs.
+        """
         async with self._lock:
-            return await self._run(prices or {}, holdings or [], trigger)
+            return await self._run(prices or {}, holdings or [], trigger, observed_at)
 
     async def _run(
-        self, prices: dict[str, float], holdings: list[dict[str, Any]], trigger: str
+        self, prices: dict[str, float], holdings: list[dict[str, Any]], trigger: str,
+        observed_at: str | None = None,
     ) -> CycleResult:
         started = time.monotonic()
         started_at = utcnow()
@@ -119,13 +130,13 @@ class Orchestrator:
 
         symbols = self._symbols(prices, holdings)
 
-        stages.append(await self._stage("prices", self._stage_prices, prices))
+        stages.append(await self._stage("prices", self._stage_prices, prices, observed_at))
         stages.append(await self._stage("valuations", self._stage_valuations, symbols, prices))
         stages.append(
             await self._stage("recommendations", self._stage_recommendations, symbols,
-                              prices, holdings)
+                              prices, holdings, observed_at)
         )
-        stages.append(await self._stage("outcomes", self._stage_outcomes, prices))
+        stages.append(await self._stage("outcomes", self._stage_outcomes, prices, observed_at))
         stages.append(await self._stage("learning", self._stage_learning))
 
         duration = int((time.monotonic() - started) * 1000)
@@ -168,13 +179,16 @@ class Orchestrator:
 
     # -- stages -------------------------------------------------------------
 
-    async def _stage_prices(self, prices: dict[str, float]) -> tuple[int, dict[str, Any]]:
+    async def _stage_prices(
+        self, prices: dict[str, float], observed_at: str | None = None
+    ) -> tuple[int, dict[str, Any]]:
         """Record the marks this cycle will reason from."""
         if not prices:
             return 0, {"note": "no prices supplied; later stages use stored marks"}
         written = self.service.store.record_prices(
             ((sym.upper(), float(price)) for sym, price in prices.items()),
             source="cycle",
+            observed_at=observed_at,
         )
         return written, {"symbols": sorted(s.upper() for s in prices)}
 
@@ -193,7 +207,7 @@ class Orchestrator:
 
     async def _stage_recommendations(
         self, symbols: list[str], prices: dict[str, float],
-        holdings: list[dict[str, Any]],
+        holdings: list[dict[str, Any]], observed_at: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
         """Run the ensemble across the book, a few symbols at a time."""
         gate = asyncio.Semaphore(SYMBOL_CONCURRENCY)
@@ -207,7 +221,8 @@ class Orchestrator:
                     if not series:
                         return None
                     price = float(series[-1]["price"])
-                return await self.service.recommend(symbol, price, holdings=holdings)
+                return await self.service.recommend(symbol, price, holdings=holdings,
+                                                    observed_at=observed_at)
 
         results = await asyncio.gather(*(one(s) for s in symbols), return_exceptions=True)
         made = 0
@@ -221,7 +236,9 @@ class Orchestrator:
         return made, {"actions": actions, "skipped": len(symbols) - made,
                       "failures": failures}
 
-    async def _stage_outcomes(self, prices: dict[str, float]) -> tuple[int, dict[str, Any]]:
+    async def _stage_outcomes(
+        self, prices: dict[str, float], observed_at: str | None = None
+    ) -> tuple[int, dict[str, Any]]:
         """Score every recommendation against the marks recorded this cycle."""
         marks = {s.upper(): float(p) for s, p in prices.items()}
         if not marks:
@@ -231,7 +248,8 @@ class Orchestrator:
                 series = self.service.store.price_series(rec["symbol"])
                 if series:
                     marks[rec["symbol"]] = float(series[-1]["price"])
-        scored = self.service.refresh_outcomes(marks) if marks else 0
+        scored = (self.service.refresh_outcomes(marks, observed_at=observed_at)
+                  if marks else 0)
         totals = self.service.performance()["totals"]
         return scored, {"judged": totals["judged"], "open": totals["open"],
                         "accuracy": totals["accuracy"]}

@@ -14,12 +14,22 @@ the agents that forecast should gain weight over the year. If every weight ends
 at its default, the loop is running but not learning — which is the failure this
 harness exists to catch.
 
-It has already earned that. Three defects came out of running it: summed totals
+It has already earned that. Defects found by running it: summed totals
 double-counting overlapping calls on one symbol, a first version of the rigging
-that inverted its own signal, and the learning loop grading a risk brake as if
-it were a forecast.
+that inverted its own signal, the learning loop grading a risk brake as if it
+were a forecast, two agents wired in but abstaining on every call, a
+correlation agent whose averaging hid the duplicate positions it existed to
+find, and brakes averaged in as bearish votes so that widening the ensemble
+produced zero BUY calls out of 96.
 
-Deterministic (fixed seed), so two runs agree and a behaviour change is a diff.
+Deterministic within a UTC day: two runs agree and a behaviour change is a
+diff. That took work. A fixed seed is not enough, because the pipeline stamps
+price marks with the wall clock and marks are keyed by `(symbol, second)` — so
+whether two cycles collapsed into one row depended on how fast the machine
+ran, and that fed the learning loop and changed what later cycles recommended.
+Cycles now carry an explicit `observed_at`. Runs on different days can still
+differ, since the performance engine measures holding periods against the real
+clock.
 """
 
 from __future__ import annotations
@@ -111,6 +121,29 @@ def print_valuation_setup(service: IntelService, drifts: dict[str, float]) -> No
               f"{drifts[symbol]:>+14.4%}")
     print("\n  Prices are pulled toward intrinsic value, recomputed each cycle. An")
     print("  agent reading valuation should beat one reading a moving average.")
+
+
+def _timeline_start() -> datetime:
+    """Midnight UTC, one simulated year back.
+
+    Anchored to a day boundary rather than to `now()` directly, because the
+    seed alone does not make this harness reproducible. `performance.evaluate`
+    measures holding period as `(now - created_at).days`, so a run that starts
+    a fraction of a second later can push a borderline call across a day
+    boundary. That changes which calls are judged, which changes the learned
+    weights, which changes what later cycles recommend — two runs of a
+    "deterministic" harness disagreeing on the action mix.
+
+    Day-aligned stamps make `.days` constant for the whole UTC day, so runs
+    agree with each other. Runs on different days can still differ; pinning
+    that would mean injecting a clock into the performance engine, which is
+    worth doing when the harness needs to assert on exact figures rather than
+    compare two runs made minutes apart.
+    """
+    midnight = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return midnight - timedelta(days=CYCLES * DAYS_PER_CYCLE)
 
 
 def print_participation(service: IntelService) -> None:
@@ -213,7 +246,7 @@ async def main() -> int:
     print("  " + "-" * (len(header) - 2))
 
     prices = dict(START_PRICES)
-    start = datetime.now(timezone.utc) - timedelta(days=CYCLES * DAYS_PER_CYCLE)
+    start = _timeline_start()
     weight_track: list[dict[str, float]] = []
 
     for cycle in range(1, CYCLES + 1):
@@ -242,15 +275,21 @@ async def main() -> int:
                                            source="simulation")
 
         holdings = [{**h, "ltp": prices.get(h["sym"], h["ltp"])} for h in HOLDINGS]
+        cycle_end = start + timedelta(days=cycle * DAYS_PER_CYCLE)
         result = await orchestrator.run_cycle(
             prices={s: round(p, 2) for s, p in prices.items()},
             holdings=holdings,
             trigger="simulation",
+            # Stamp this cycle's marks with the simulated date. Without it the
+            # pipeline records them at wall-clock, where marks are keyed by
+            # (symbol, second) — so whether two cycles collapsed into one row
+            # depended on how fast the machine ran, and the "deterministic"
+            # harness disagreed with itself across runs.
+            observed_at=cycle_end.isoformat(),
         )
 
         # Age this cycle's calls so later cycles can judge them. Without this
         # every recommendation stays OPEN and the loop never gets a sample.
-        cycle_end = start + timedelta(days=cycle * DAYS_PER_CYCLE)
         with service.store.conn as conn:
             conn.execute(
                 "UPDATE recommendations SET created_at = ? WHERE created_at > ?",

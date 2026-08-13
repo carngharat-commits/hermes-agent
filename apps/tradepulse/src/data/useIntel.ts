@@ -44,6 +44,9 @@ export function useIntel(rows: { sym: string; ltp?: number }[]): IntelState {
       setLoading(true);
       const payload = symbols.map((sym) => ({
         sym,
+        // One price per symbol — the first row's. A table normally has one
+        // row per ticker, but a watchlist can hold the same name twice; the
+        // caller decides which rows are eligible before passing them in.
         ltp: Number(rows.find((r) => r.sym === sym)?.ltp ?? 0),
       }));
       try {

@@ -130,3 +130,21 @@ def test_intel_routes_do_not_disturb_the_kite_ones(client: TestClient):
     assert client.get("/api/kite/status").json()["mode"] == "stub"
     assert client.get("/api/kite/session").json()["authenticated"] is False
     assert client.get("/healthz").json()["ok"] is True
+
+
+def test_enrich_reports_no_margin_for_an_unpriced_row(client: TestClient):
+    """A watchlist row with no market price must not be given a discount.
+
+    The UI filters these out before asking, but the endpoint is the contract:
+    a caller that does ask gets an explicit null rather than a margin computed
+    against whatever price the symbol was last valued at.
+    """
+    client.post("/api/intel/enrich", json={"symbols": [{"sym": "TITAN", "ltp": 3400.0}]})
+    body = client.post("/api/intel/enrich",
+                       json={"symbols": [{"sym": "TITAN", "ltp": 0}]}).json()
+
+    row = body["rows"][0]
+    assert row["covered"] is True
+    assert row["valuation"]["intrinsic_value"] is not None   # the value stands
+    assert row["valuation"]["margin_of_safety"] is None      # the comparison does not
+    assert row["valuation"]["discount_premium"] is None

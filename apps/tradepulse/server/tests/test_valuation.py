@@ -267,3 +267,25 @@ def test_a_worse_balance_sheet_never_scores_better():
     solid = value(make(total_debt=10.0, cash=500.0), market_price=50.0)
     broken = value(levered(), market_price=45.0)
     assert broken["fair_value"] <= solid["fair_value"]
+
+
+def test_an_unpriced_symbol_does_not_inherit_a_stale_margin():
+    """A watchlist row with no market price must not show an old discount.
+
+    `valuation_for` reuses the stored row when the financials are unchanged and
+    only reprices it. With no price to reprice against, the price-dependent
+    fields have to be cleared — leaving them showed the margin from whatever
+    price the symbol was last valued at, rendered as if it were current.
+    """
+    from tradepulse_server.intel.service import IntelService
+    from tradepulse_server.intel.store import IntelStore
+
+    service = IntelService(store=IntelStore(":memory:"))
+    priced = service.valuation_for("TITAN", 3000.0)
+    assert priced["margin_of_safety"] is not None
+
+    unpriced = service.valuation_for("TITAN", 0.0)
+    assert unpriced["margin_of_safety"] is None
+    assert unpriced["discount_premium"] is None
+    # The valuation itself still stands — only the comparison to price is gone.
+    assert unpriced["intrinsic_value"] == priced["intrinsic_value"]

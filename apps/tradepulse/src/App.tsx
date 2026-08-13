@@ -72,6 +72,11 @@ export default function TradePulse() {
     } else {
       setWatchlist([{
         id: item.id, sym: item.sym, qty: item.qty, target: item.target, ltp: item.ltp,
+        // Whether `ltp` is a price the user actually saw or was backfilled
+        // from the target. Dropping it here made every target-only row look
+        // priced, and the valuation strip then reported a discount to a
+        // "market price" that was really the user's own target.
+        ltpEntered: item.ltpEntered,
         segment: item.segment, broker: item.broker, note: item.note, photo: item.photo,
       }, ...watchlist]);
     }

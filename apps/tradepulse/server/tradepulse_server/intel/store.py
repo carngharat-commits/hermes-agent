@@ -236,8 +236,9 @@ class IntelStore:
                 (symbol, observed_at or utcnow(), price, source),
             )
 
-    def record_prices(self, marks: Iterable[tuple[str, float]], *, source: str = "kite") -> int:
-        stamp = utcnow()
+    def record_prices(self, marks: Iterable[tuple[str, float]], *,
+                      source: str = "kite", observed_at: str | None = None) -> int:
+        stamp = observed_at or utcnow()
         rows = [(sym, stamp, price, source) for sym, price in marks]
         with self.conn as conn:
             conn.executemany(

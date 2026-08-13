@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { AIExplainDrawer } from "@/features/intelligence/AIExplainDrawer";
 import { Pill } from "@/components/ui/Pill";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { inr } from "@/lib/format";
@@ -12,6 +15,11 @@ import type { EnrichedRow } from "@/api/intel";
  * as a real one.
  */
 export const ValuationStrip = ({ row }: { row?: EnrichedRow }) => {
+  // Declared before the coverage guard: this component returns null for an
+  // uncovered symbol, and a hook after that early return would run on some
+  // renders and not others.
+  const [explaining, setExplaining] = useState(false);
+
   if (!row?.covered || row.valuation?.intrinsic_value == null) return null;
 
   const v = row.valuation;
@@ -35,8 +43,11 @@ export const ValuationStrip = ({ row }: { row?: EnrichedRow }) => {
       </div>
     );
   }
-  const margin = v.margin_of_safety ?? 0;
-  const cheap = margin > 0;
+  // Null rather than zero when there is no market price to compare against.
+  // Defaulting it to 0 would render "0% MOS" — "fairly valued" — for a symbol
+  // nobody has priced, which is a claim, not a blank.
+  const margin = v.margin_of_safety;
+  const cheap = (margin ?? 0) > 0;
   const action = row.recommendation?.action;
 
   return (
@@ -51,9 +62,13 @@ export const ValuationStrip = ({ row }: { row?: EnrichedRow }) => {
         {inr(v.intrinsic_value, 0)}
       </span>
 
-      <Pill tone={cheap ? "up" : "down"} size="xs">
-        {cheap ? `${(margin * 100).toFixed(0)}% MOS` : `${Math.abs(margin * 100).toFixed(0)}% over`}
-      </Pill>
+      {margin == null ? (
+        <Pill tone="neutral" size="xs">no live price</Pill>
+      ) : (
+        <Pill tone={cheap ? "up" : "down"} size="xs">
+          {cheap ? `${(margin * 100).toFixed(0)}% MOS` : `${Math.abs(margin * 100).toFixed(0)}% over`}
+        </Pill>
+      )}
 
       {v.fair_value != null && (
         <span className="text-[10px]" style={{ color: T.fgMute, ...FONT_MONO }}>
@@ -71,9 +86,22 @@ export const ValuationStrip = ({ row }: { row?: EnrichedRow }) => {
       </span>
 
       {action && (
-        <Pill tone={action === "BUY" ? "up" : action === "HOLD" ? "info" : "warn"} size="xs">
-          AI {action} {row.recommendation?.confidence?.toFixed(0)}%
-        </Pill>
+        <button
+          onClick={() => setExplaining(true)}
+          title="Why the AI said this"
+          className="inline-flex items-center gap-1"
+        >
+          <Pill tone={action === "BUY" ? "up" : action === "HOLD" ? "info" : "warn"} size="xs">
+            AI {action} {row.recommendation?.confidence?.toFixed(0)}%
+          </Pill>
+          <span className="text-[9px] underline" style={{ color: T.fgDim, ...FONT_MONO }}>
+            why?
+          </span>
+        </button>
+      )}
+
+      {explaining && row.recommendation && (
+        <AIExplainDrawer rec={row.recommendation} onClose={() => setExplaining(false)} />
       )}
 
       {v.provider === "stub" && (

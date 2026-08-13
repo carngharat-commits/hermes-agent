@@ -64,6 +64,7 @@ class IntelService:
         *,
         holdings: list[dict[str, Any]] | None = None,
         persist: bool = True,
+        observed_at: str | None = None,
     ) -> dict[str, Any]:
         """Run the agents, consolidate, and record the call permanently."""
         fundamentals = self.provider.fetch(symbol)
@@ -92,7 +93,7 @@ class IntelService:
         if persist:
             rec_id = self.store.record_recommendation(recommendation)
             self.store.record_agent_outputs(rec_id, [v.as_row(symbol) for v in views])
-            self.store.record_price(symbol, market_price)
+            self.store.record_price(symbol, market_price, observed_at=observed_at)
             recommendation["id"] = rec_id
             recommendation["created_at"] = self.store.recommendation(rec_id)["created_at"]
 
@@ -139,9 +140,12 @@ class IntelService:
 
     # -- performance --------------------------------------------------------
 
-    def refresh_outcomes(self, prices: dict[str, float]) -> int:
+    def refresh_outcomes(
+        self, prices: dict[str, float], *, observed_at: str | None = None
+    ) -> int:
         """Re-score every recommendation against the latest marks."""
-        self.store.record_prices(prices.items(), source="refresh")
+        self.store.record_prices(prices.items(), source="refresh",
+                                 observed_at=observed_at)
         scored = 0
         for rec in self.store.recommendations(limit=1000):
             current = prices.get(rec["symbol"])
@@ -188,7 +192,15 @@ def _reprice(stored: dict[str, Any], market_price: float) -> dict[str, Any]:
     """Recompute only the price-dependent fields of a stored valuation."""
     intrinsic = stored.get("intrinsic_value")
     if not intrinsic or market_price <= 0:
-        return {"market_price": market_price}
+        # Nothing to compute against, so the stored margin is no longer an
+        # answer to anything. Clearing it matters: a watchlist row with no
+        # market price would otherwise render the discount from whatever price
+        # this symbol last happened to be valued at, and read as current.
+        return {
+            "market_price": market_price,
+            "margin_of_safety": None,
+            "discount_premium": None,
+        }
     return {
         "market_price": market_price,
         "margin_of_safety": round((intrinsic - market_price) / intrinsic, 4),

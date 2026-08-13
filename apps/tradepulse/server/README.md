@@ -60,6 +60,13 @@ reads the outcomes. Each stage is idempotent (a retry after a crash is safe),
 isolated (a failing stage is recorded and the cycle carries on), and audited to
 the `runs` table.
 
+`run_cycle` takes an optional `observed_at` — when these prices were seen. It
+defaults to now, which is right for a live cycle; a caller replaying history
+passes the timestamp the marks belong to. Price marks are keyed by
+`(symbol, observed_at)` at second resolution, so without it a replay's cycles
+merge into each other depending on how fast the machine runs. That is what
+made the "deterministic" simulation harness disagree with itself.
+
 `scheduler.py` drives it on `TRADEPULSE_CYCLE_SECONDS` (0 disables). The first
 cycle waits one interval so a slow pipeline can never block startup, and
 shutdown awaits the task rather than abandoning a cycle mid-write. A failing

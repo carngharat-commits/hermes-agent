@@ -143,6 +143,26 @@ Reads now go through a 15-second per-session cache (`server/cache.py`) — one
 page load fans out to five Kite endpoints, and Kite publishes per-endpoint
 rate limits.
 
+## Where the AI shows up
+
+Every AI call in the UI can be opened. The pill on a holding or watchlist row
+reads `AI BUY 39% · why?`, and the drawer behind it shows how the score was
+reached, each agent's own score and reasoning, which agents applied a
+portfolio brake, which sat the question out and what they'd need, and the
+provenance of the call. It is assembled from the recommendation's stored
+evidence rather than regenerated, so an old call reads in the terms it was
+actually made and the explanation cannot drift from the arithmetic.
+
+That is a requirement, not a nicety: a bare `AI HOLD 32%` with nowhere to
+click is an unexplained decision, and it is worst on the calls that most need
+explaining — the ones a brake pulled back from a BUY.
+
+Valuation only ever renders against a real market price. A watchlist row saved
+with just a target gets no intrinsic-value comparison, because the target is
+what the user hopes to pay and calling the gap a discount to market would be a
+made-up number. Where a market price exists, the row also says how the target
+compares to intrinsic value — the question a watchlist actually asks.
+
 **Step 4 — what's left.** Live quotes (`/quote`) would replace the static
 `MARKET` block and make `dayPct` move; that one needs its own cache policy,
 since 15 seconds of staleness is fine for holdings and not for a ticker.

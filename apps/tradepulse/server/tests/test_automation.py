@@ -347,3 +347,50 @@ def test_logging_out_revokes_the_promotion(client: TestClient):
 def test_run_history_reports_which_price_source_is_in_use(client: TestClient):
     body = client.get("/api/intel/runs").json()
     assert body["price_feed"]["source"] == "stored"
+
+
+# --- replaying history must not stamp marks with the wall clock -------------
+# A fixed seed did not make the automation harness reproducible: the pipeline
+# recorded every mark at `utcnow()`, and marks are keyed by (symbol, second),
+# so whether two cycles collapsed into one row depended on how fast the machine
+# ran. That changed the price series, which changed the learning loop, which
+# changed what later cycles recommended.
+
+def test_a_cycle_records_its_marks_at_the_time_it_is_given():
+    import asyncio
+
+    from tradepulse_server.intel.orchestrator import Orchestrator
+    from tradepulse_server.intel.service import IntelService
+    from tradepulse_server.intel.store import IntelStore
+
+    service = IntelService(store=IntelStore(":memory:"))
+    orchestrator = Orchestrator(service)
+
+    stamps = ["2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"]
+    for stamp in stamps:
+        asyncio.run(orchestrator.run_cycle(
+            prices={"RELIANCE": 1200.0},
+            holdings=[{"sym": "RELIANCE", "qty": 10, "ltp": 1200.0}],
+            observed_at=stamp,
+        ))
+
+    observed = {row["observed_at"] for row in service.store.price_series("RELIANCE")}
+    assert observed == set(stamps), observed
+
+
+def test_a_live_cycle_still_stamps_now_by_default():
+    """Only a replay passes a timestamp; a real cycle must not have to."""
+    import asyncio
+
+    from tradepulse_server.intel.orchestrator import Orchestrator
+    from tradepulse_server.intel.service import IntelService
+    from tradepulse_server.intel.store import IntelStore
+    from tradepulse_server.intel.store import utcnow
+
+    service = IntelService(store=IntelStore(":memory:"))
+    before = utcnow()
+    asyncio.run(Orchestrator(service).run_cycle(prices={"TCS": 3000.0}))
+
+    series = service.store.price_series("TCS")
+    assert series
+    assert all(row["observed_at"] >= before for row in series)
