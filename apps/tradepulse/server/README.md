@@ -65,19 +65,45 @@ cycle waits one interval so a slow pipeline can never block startup, and
 shutdown awaits the task rather than abandoning a cycle mid-write. A failing
 cycle backs off exponentially instead of hammering a broken dependency.
 
-Agents fan out concurrently with a per-agent timeout. Today the three
+Agents fan out concurrently with a per-agent timeout. Today the five
 deterministic ones return in microseconds, but news, sentiment and macro will
 each be a network call or a model round-trip, and serial execution would make
 the ensemble's latency the sum of all of them.
 
-**The scheduler has no price source.** A Kite session is per-browser, not
-per-process, so unattended cycles run over stored marks. Until a background
-price feed exists, `POST /api/intel/run` with prices is the real trigger.
+They are two different kinds of agent and the consolidator treats them as
+such. **Forecasts** (fundamental, technical, and the three pending ones) claim
+a direction and set the blended score between them. **Brakes** (portfolio
+risk, cross-market correlation, sector diversification) claim only that the
+user already carries the exposure; they scale a bullish score down and are
+ignored on a bearish one. So a brake can cap a BUY at a HOLD but can never
+produce a REDUCE — owning something is not a reason to sell it. Averaging the
+two kinds together, which is what the first version did, made every added
+brake drag the ensemble bearish by construction: a simulated year returned 0
+BUY calls out of 96 and 26 REDUCEs driven purely by concentration.
+
+The same split governs the learning loop, which grades only forecasts. Both
+read `agents.NON_DIRECTIONAL`, derived from the agents themselves.
+
+`simulate_automation.py` drives twelve cycles over a simulated year against a
+rigged market, and is the harness that found the bearish-blend defect above.
+It reports three things per run that unit tests cannot: which agents actually
+*spoke* (an agent can pass every test and abstain on every real run because
+nothing populates the context it reads — both new agents shipped in exactly
+that state), what the ensemble *recommended* as a distribution, and whether
+any weight moved off its default.
+
+`prices.py` gives the scheduler a price source. A Kite session belongs to a
+browser, not a process, so a session must be explicitly **promoted** before
+background cycles quote with it — deliberate and revocable, since the token is
+a bearer credential for the whole account. With nothing promoted, cycles run
+over stored marks rather than not running.
 
 | Route | Purpose |
 | --- | --- |
 | `POST /api/intel/run` | Run one cycle now |
 | `GET /api/intel/runs` | Run history + scheduler status |
+| `POST /api/intel/price-feed/promote` | Let background cycles quote with this session |
+| `POST /api/intel/price-feed/revoke` | Stop them |
 
 ## Mapping (`mapping.py`)
 
@@ -111,8 +137,11 @@ matter. Anything that does — live quotes — will want its own path.
 
 ## What's still a stub
 
-- **No price feed behind the scheduler** (above), so automated cycles
-  re-score against stored marks rather than fresh ones.
+- **Three agents still abstain.** News, sentiment and macro implement the
+  agent contract and return "not wired" with what they'd need. They want a
+  feed and a language model, not code.
+- **Unpromoted cycles quote stale marks** (above). A background cycle with no
+  promoted session re-scores against the last recorded price.
 - **Session storage is in-process memory** (`sessions.py`). A restart logs
   everyone out and a second worker shares nothing with the first. Back
   `SessionStore` with Redis or a table before this runs anywhere real — the

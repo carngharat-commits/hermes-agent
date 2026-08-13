@@ -47,10 +47,28 @@ START_PRICES = {
     "BHEL": 26.0, "IRCTC": 165.0, "CANBK": 35.0, "TITAN": 430.0,
 }
 
+# A shared shock, so some names genuinely move together.
+#
+# The first run of the widened harness had cross_market speaking on all 96
+# calls with a score of exactly 0.0 every time: every symbol's path was drift
+# plus its own independent noise, so nothing correlated with anything and the
+# agent was live but never exercised. A planted correlation is the same trick
+# as the planted valuation signal — without it the harness confirms only that
+# the agent doesn't crash.
+COUPLED = {"CANBK": "banks", "AXISBANK": "banks", "RELIANCE": "cyclicals",
+           "TATASTEEL": "cyclicals", "BHEL": "cyclicals"}
+COUPLING = 0.75          # share of a coupled name's noise that is its group's
+
+# Deliberately bank-heavy. CANBK and AXISBANK are each a modest slice, so the
+# concentration agent — which reads one row at a time — waves both through,
+# while together they are over half the book. That gap is what the
+# diversification agent exists to close, and a book without it would let the
+# agent run all year without ever being exercised.
 HOLDINGS = [
     {"sym": "RELIANCE", "qty": 40, "ltp": 260.0},
     {"sym": "TCS", "qty": 8, "ltp": 1200.0},
     {"sym": "CANBK", "qty": 300, "ltp": 35.0},
+    {"sym": "AXISBANK", "qty": 30, "ltp": 380.0},
 ]
 
 
@@ -95,6 +113,85 @@ def print_valuation_setup(service: IntelService, drifts: dict[str, float]) -> No
     print("  agent reading valuation should beat one reading a moving average.")
 
 
+def print_participation(service: IntelService) -> None:
+    """Who actually spoke, over the whole year.
+
+    An agent can be wired into the ensemble, pass every unit test, and still
+    abstain on every real run because nothing populates the context it reads.
+    The weight table cannot show that — a non-directional agent sits at its
+    default whether it contributed or not — so participation gets its own
+    panel. Both new brakes shipped in exactly that broken state.
+    """
+    rule("ENSEMBLE PARTICIPATION")
+    recs = service.store.recommendations(limit=1000)
+    spoke: dict[str, int] = {}
+    scored: dict[str, list[float]] = {}
+    why_not: dict[str, str] = {}
+
+    for rec in recs:
+        for row in service.store.agent_outputs(rec["id"]):
+            agent = row["agent"]
+            if row["score"] is None or row["stance"] == "ABSTAIN":
+                why_not.setdefault(agent, row["summary"])
+                continue
+            spoke[agent] = spoke.get(agent, 0) + 1
+            scored.setdefault(agent, []).append(float(row["score"]))
+
+    print(f"  {'agent':<18}{'spoke':>8}{'of':>6}{'rate':>8}"
+          f"{'mean score':>13}{'strongest':>12}")
+    for agent in sorted({*spoke, *why_not}):
+        count = spoke.get(agent, 0)
+        scores = scored.get(agent, [])
+        mean = sum(scores) / len(scores) if scores else None
+        peak = max(scores, key=abs) if scores else None
+        print(f"  {agent:<18}{count:>8}{len(recs):>6}{count / len(recs):>8.0%}"
+              f"{('—' if mean is None else f'{mean:+.1f}'):>13}"
+              f"{('—' if peak is None else f'{peak:+.1f}'):>12}")
+
+    silent = sorted(a for a in why_not if a not in spoke)
+    if silent:
+        print("\n  Never contributed:")
+        for agent in silent:
+            print(f"    {agent:<18}{why_not[agent]}")
+
+
+def print_action_mix(service: IntelService) -> None:
+    """What the ensemble actually told the user to do, and how hard it braked.
+
+    Per-agent scores can all look sane while the blend they add up to does
+    not. Widening the ensemble to five agents turned 5 BUY calls into 0 and 6
+    REDUCEs into 26 without a single agent misbehaving: three of the five
+    could only score at or below zero, so the mean was bearish by
+    construction. Only the distribution showed it.
+    """
+    rule("WHAT IT RECOMMENDED")
+    recs = service.store.recommendations(limit=1000)
+    mix: dict[str, int] = {}
+    braked = 0
+    factors: list[float] = []
+    for rec in recs:
+        mix[rec["action"]] = mix.get(rec["action"], 0) + 1
+        evidence = rec.get("evidence") or {}
+        factor = evidence.get("restraint_factor")
+        if factor is not None:
+            factors.append(factor)
+            if factor < 0.999 and (evidence.get("forecast_score") or 0) > 0:
+                braked += 1
+
+    for action in ("BUY", "HOLD", "REDUCE", "SELL", "AVOID"):
+        count = mix.get(action, 0)
+        bar = "█" * round(count / max(len(recs), 1) * 40)
+        print(f"  {action:<10}{count:>5}  {bar}")
+
+    if factors:
+        mean_factor = sum(factors) / len(factors)
+        print(f"\n  bullish calls held back by portfolio exposure   {braked}/{len(recs)}")
+        print(f"  mean restraint factor applied                  {mean_factor:.2f} "
+              f"(1.00 = no brake)")
+        print("\n  A brake caps a BUY at a HOLD. It never manufactures a REDUCE —")
+        print("  owning something is not a reason to sell it.")
+
+
 async def main() -> int:
     print("=" * WIDTH)
     print("TradePulse automation — 12 orchestrated cycles over a simulated year")
@@ -128,8 +225,18 @@ async def main() -> int:
         # so the technical agent and the drawdown maths have a real path.
         for day in range(DAYS_PER_CYCLE):
             stamp = start + timedelta(days=(cycle - 1) * DAYS_PER_CYCLE + day)
+            group_shock = {
+                group: random.uniform(-0.012, 0.012)
+                for group in sorted(set(COUPLED.values()))
+            }
             for symbol in prices:
-                prices[symbol] *= 1 + drifts[symbol] + random.uniform(-0.012, 0.012)
+                idiosyncratic = random.uniform(-0.012, 0.012)
+                group = COUPLED.get(symbol)
+                noise = (
+                    COUPLING * group_shock[group] + (1 - COUPLING) * idiosyncratic
+                    if group else idiosyncratic
+                )
+                prices[symbol] *= 1 + drifts[symbol] + noise
                 service.store.record_price(symbol, round(prices[symbol], 2),
                                            observed_at=stamp.isoformat(),
                                            source="simulation")
@@ -160,6 +267,9 @@ async def main() -> int:
               f"{('—' if accuracy is None else f'{accuracy:.0%}'):>10}"
               f"{weights.get('fundamental', 0):>13.2f}{weights.get('technical', 0):>11.2f}"
               f"{weights.get('portfolio_risk', 0):>8.2f}{result.duration_ms:>7}")
+
+    print_participation(service)
+    print_action_mix(service)
 
     rule("DID IT LEARN?")
     first, last = weight_track[0], weight_track[-1]

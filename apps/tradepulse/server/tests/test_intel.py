@@ -616,3 +616,89 @@ def test_service_populates_peer_history_and_sectors(service: IntelService):
     # And the explanation names them, per the spec's no-unexplained-AI rule.
     assert "correlation" in rec["reasoning"].lower()
     assert "banking" in rec["reasoning"].lower()
+
+
+# --- found by simulate_automation.py ---------------------------------------
+# Two banks correlating at 0.90 inside a four-name book averaged out to 0.30
+# and scored 0.0. The mean hid the near-duplicate position the agent exists
+# to find, so the score now leans on the closest mover.
+
+def test_one_near_duplicate_is_not_averaged_away_by_unrelated_names():
+    from tradepulse_server.intel.agents import CrossMarketAgent
+
+    twin = [0.02, -0.015, 0.01, -0.005] * 8
+    view = CrossMarketAgent().evaluate(Context(
+        symbol="AXISBANK", market_price=100,
+        price_history=_walk(100, twin),
+        peer_history={
+            "CANBK": _walk(40, twin),                          # the duplicate
+            "TCS": _walk(3000, [0.01, 0.012, -0.02, 0.004] * 8),
+            "RELIANCE": _walk(260, [-0.01, 0.018, 0.002, -0.014] * 8),
+        },
+    ))
+    assert view.detail["closest"] == "CANBK"
+    assert view.detail["closest_correlation"] > 0.9
+    assert view.detail["average"] < 0.45      # the mean alone would say "fine"
+    assert view.score < -40                   # the agent does not
+    assert "CANBK" in view.reasons[0]
+
+
+# --- brakes restrain, they do not vote -------------------------------------
+# Found by simulate_automation.py once the ensemble reached five contributing
+# agents: three of them can only ever score at or below zero, so averaging
+# them alongside the forecasts dragged every blend bearish. A simulated year
+# produced 0 BUY calls out of 96 and 26 REDUCEs, most generated purely by
+# concentration — telling a user to sell a good business for owning it.
+
+def brake(agent="portfolio_risk", score=-100.0, confidence=70.0) -> AgentView:
+    return AgentView(agent=agent, stance="BEARISH", score=score,
+                     confidence=confidence, summary="already held",
+                     reasons=("Position is 30% of portfolio value.",))
+
+
+def test_a_brake_cannot_turn_a_bullish_case_into_a_sell():
+    result = consolidate("X", 100, [bullish(score=80.0), brake(),
+                                    brake("cross_market"), brake("diversification")])
+    assert result["action"] in {"BUY", "HOLD"}
+    assert result["evidence"]["forecast_score"] > 0
+
+
+def test_a_brake_does_pull_a_buy_back_to_a_hold():
+    unbraked = consolidate("X", 100, [bullish(score=80.0)])
+    braked = consolidate("X", 100, [bullish(score=80.0), brake()])
+    assert unbraked["action"] == "BUY"
+    assert braked["action"] == "HOLD"
+    assert braked["evidence"]["restraint_factor"] < 1.0
+
+
+def test_a_brake_leaves_a_genuinely_bearish_call_alone():
+    """Concentration must not deepen a REDUCE it had no view on."""
+    bearish = AgentView(agent="fundamental", stance="BEARISH", score=-60.0,
+                        confidence=80.0, summary="expensive", reasons=("Overvalued.",))
+    alone = consolidate("X", 100, [bearish])
+    with_brake = consolidate("X", 100, [bearish, brake()])
+    assert alone["evidence"]["blended_score"] == with_brake["evidence"]["blended_score"]
+
+
+def test_brakes_alone_are_a_hold_not_a_sell():
+    """No forecaster spoke, so there is no direction to report."""
+    result = consolidate("X", 100, [brake(), brake("diversification")])
+    assert result["action"] == "HOLD"
+    assert result["evidence"]["forecast_score"] == 0.0
+
+
+def test_a_brake_that_changes_the_answer_is_explained():
+    """The spec's rule: no unexplained AI decisions."""
+    result = consolidate("X", 100, [bullish(score=80.0), brake()])
+    assert "holds it back" in result["reasoning"]
+    assert "not a reason to sell" in result["reasoning"]
+    assert "BUY" in result["reasoning"]        # names what it would have been
+
+
+def test_the_non_directional_set_is_derived_from_the_agents():
+    """One place to register the fact; a hand-kept copy drifted twice."""
+    from tradepulse_server.intel import agents as agent_module
+
+    assert learning.NON_DIRECTIONAL is agent_module.NON_DIRECTIONAL
+    assert agent_module.NON_DIRECTIONAL == {
+        "portfolio_risk", "cross_market", "diversification"}

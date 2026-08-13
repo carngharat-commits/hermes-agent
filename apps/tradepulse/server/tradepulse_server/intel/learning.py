@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import agents
 from .consolidator import DEFAULT_WEIGHTS
 
 MIN_SAMPLE = 10          # judged calls before an agent's weight moves at all
@@ -28,8 +29,10 @@ LEARNING_RATE = 0.35     # how far toward the evidence a weight moves per run
 
 # Agents that do not forecast a direction. Their contribution is real but it
 # is not a prediction, so comparing their sign against the price move measures
-# nothing — see the `directional` flag on the Agent protocol.
-NON_DIRECTIONAL = {"portfolio_risk", "cross_market", "diversification"}
+# nothing — see the `directional` flag on the Agent protocol. Read from the
+# agents themselves rather than restated here, so registering an agent is the
+# only place the fact lives.
+NON_DIRECTIONAL = agents.NON_DIRECTIONAL
 
 
 def review(recommendation: dict[str, Any], outcome: dict[str, Any],

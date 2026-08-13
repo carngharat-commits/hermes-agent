@@ -260,6 +260,7 @@ class CrossMarketAgent:
     directional = False
     MIN_OVERLAP = 20          # paired observations before a correlation means anything
     HIGH = 0.75
+    CLOSEST_WEIGHT = 0.7      # how much the tightest pair carries vs the mean
 
     def evaluate(self, context: Context) -> AgentView:
         peers = context.peer_history or {}
@@ -286,12 +287,23 @@ class CrossMarketAgent:
         average = sum(correlations.values()) / len(correlations)
         tight = {s: c for s, c in correlations.items() if c >= self.HIGH}
 
+        # Weighted toward the closest mover rather than the mean.
+        #
+        # The mean was the first version and it hid the thing this agent is
+        # for. In the automation harness two banks moving at 0.90 with each
+        # other sat inside a four-name book, the other two uncorrelated: mean
+        # 0.30, score 0.0, and a near-duplicate position waved through. The
+        # risk is "this name is something you already own", and one tight pair
+        # delivers that in full however many unrelated names sit beside it.
+        # The mean is kept as a secondary term so a broadly cohesive book
+        # still registers.
+        signal = self.CLOSEST_WEIGHT * highest[1] + (1 - self.CLOSEST_WEIGHT) * average
         # Only penalise; low correlation is a neutral fact, not a buy signal.
-        score = -SCALE * min(1.0, max(0.0, (average - 0.3) / 0.5)) if average > 0.3 else 0.0
+        score = -SCALE * min(1.0, max(0.0, (signal - 0.3) / 0.5)) if signal > 0.3 else 0.0
 
         reasons = [
-            f"Average correlation with the rest of the book is {average:+.2f}.",
             f"Closest mover is {highest[0]} at {highest[1]:+.2f}.",
+            f"Average correlation with the rest of the book is {average:+.2f}.",
         ]
         if tight:
             reasons.append(
@@ -307,8 +319,9 @@ class CrossMarketAgent:
             summary=f"{average:+.2f} average correlation across "
                     f"{len(correlations)} holding(s).",
             reasons=tuple(reasons),
-            detail={"average": round(average, 3), "correlations": correlations,
-                    "tightly_coupled": sorted(tight)},
+            detail={"average": round(average, 3), "closest": highest[0],
+                    "closest_correlation": highest[1], "signal": round(signal, 3),
+                    "correlations": correlations, "tightly_coupled": sorted(tight)},
         )
 
 
@@ -463,6 +476,13 @@ PENDING_AGENTS: tuple[Agent, ...] = (
 )
 
 ALL_AGENTS: tuple[Agent, ...] = DETERMINISTIC_AGENTS + PENDING_AGENTS
+
+# Derived, never hand-maintained. Both the consolidator and the learning loop
+# need to know which agents forecast a direction and which only apply a brake,
+# and a hand-written copy of this set has already drifted twice.
+NON_DIRECTIONAL: frozenset[str] = frozenset(
+    a.name for a in ALL_AGENTS if not a.directional
+)
 
 
 def _stance(score: float) -> str:

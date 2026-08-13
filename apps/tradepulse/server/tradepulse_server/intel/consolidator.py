@@ -5,6 +5,16 @@ unexplained AI decision*. So the explanation is not generated after the fact
 from the answer — it is assembled from the same agent views that produced the
 answer, which means it cannot drift from the maths.
 
+Agents come in two kinds and are combined differently, which is the main thing
+to understand here:
+
+* **Forecasts** (fundamental, technical, news, sentiment, macro) claim the
+  price will move. They set the direction, as a weighted mean.
+* **Brakes** (portfolio risk, cross-market, diversification) claim only that
+  the user already carries this exposure. They scale a bullish score down and
+  are ignored on a bearish one — a brake can cap a BUY at a HOLD, and can
+  never produce a REDUCE.
+
 Weights come from the learning loop when it has enough history, and fall back
 to defaults when it doesn't. Either way the weights used are recorded on the
 recommendation, so an old call can always be re-read in the terms it was made.
@@ -14,9 +24,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .agents import AgentView
+from .agents import SCALE, AgentView, NON_DIRECTIONAL
 
-ENGINE_VERSION = "consolidator-0.1.0"
+ENGINE_VERSION = "consolidator-0.2.0"
 
 # Starting weights, replaced per-agent by learned ones once the loop has data.
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -56,17 +66,18 @@ def consolidate(
     if not contributing:
         return _no_view(symbol, market_price, abstained, weights)
 
-    # Each view counts by its assigned weight and its own confidence: an agent
-    # that is unsure moves the blend less than one that is certain.
-    total_weight = 0.0
-    weighted_sum = 0.0
-    for view in contributing:
-        effective = weights.get(view.agent, 0.5) * (view.confidence / 100)
-        weighted_sum += (view.score or 0.0) * effective
-        total_weight += effective
+    # Forecasts set the direction; brakes only restrain it. Averaging the two
+    # together was a real defect — see `_restraint`.
+    forecasts = [v for v in contributing if v.agent not in NON_DIRECTIONAL]
+    brakes = [v for v in contributing if v.agent in NON_DIRECTIONAL]
 
-    blended = weighted_sum / total_weight if total_weight else 0.0
-    action = _action(blended)
+    raw = _weighted_mean(forecasts, weights) if forecasts else 0.0
+    factor, restraint = _restraint(brakes, weights)
+
+    # A brake is a reason not to add, never a reason to sell. It can pull a
+    # BUY back to a HOLD; it cannot push a HOLD into a REDUCE.
+    blended = raw * factor if raw > 0 else raw
+    action = _action(blended) if forecasts else "HOLD"
 
     confidence = _confidence(contributing, abstained, blended)
 
@@ -80,9 +91,13 @@ def consolidate(
         "fundamental_score": _score_of(views, "fundamental"),
         "macro_score": _score_of(views, "macro"),
         "news_sentiment": _score_of(views, "sentiment"),
-        "reasoning": _reasoning(action, confidence, contributing, abstained),
+        "reasoning": _reasoning(action, confidence, contributing, abstained,
+                                raw=raw, blended=blended, brakes=brakes),
         "evidence": {
             "blended_score": round(blended, 1),
+            "forecast_score": round(raw, 1),
+            "restraint": round(restraint, 1),
+            "restraint_factor": round(factor, 3),
             "weights_used": {v.agent: weights.get(v.agent, 0.5) for v in contributing},
             "contributing": [v.as_row(symbol) for v in contributing],
             "abstained": [{"agent": v.agent, "why": v.summary} for v in abstained],
@@ -90,6 +105,48 @@ def consolidate(
         },
         "engine_version": ENGINE_VERSION,
     }
+
+
+def _weighted_mean(views: list[AgentView], weights: dict[str, float]) -> float:
+    """Each view counts by its assigned weight and its own confidence.
+
+    An agent that is unsure moves the blend less than one that is certain.
+    """
+    total = 0.0
+    weighted = 0.0
+    for view in views:
+        effective = weights.get(view.agent, 0.5) * (view.confidence / 100)
+        weighted += (view.score or 0.0) * effective
+        total += effective
+    return weighted / total if total else 0.0
+
+
+def _restraint(
+    brakes: list[AgentView], weights: dict[str, float]
+) -> tuple[float, float]:
+    """How hard the non-forecasting agents are pulling on the handbrake.
+
+    Returns `(factor, restraint)` where factor is in 0..1 and multiplies a
+    bullish score.
+
+    This split exists because the first version had none. Brakes were averaged
+    in alongside forecasts on the same -100..100 axis, and since a brake can
+    only ever emit a score at or below zero, every one of them added to the
+    ensemble dragged the mean bearish by construction. Running a simulated
+    year with three brakes and two forecasts produced zero BUY calls out of
+    96 and twenty-six REDUCEs, most of them generated purely by concentration
+    — the engine telling a user to sell a good business because they already
+    owned some of it.
+
+    A brake means "you already have this exposure". That is a reason not to
+    add. It is not a reason to sell, and it says nothing at all about a name
+    the user does not hold.
+    """
+    if not brakes:
+        return 1.0, 0.0
+    restraint = _weighted_mean(brakes, weights)   # <= 0
+    factor = max(0.0, min(1.0, 1 + restraint / SCALE))
+    return factor, restraint
 
 
 def _action(blended: float) -> str:
@@ -130,13 +187,29 @@ def _confidence(
 
 def _reasoning(
     action: str, confidence: float, contributing: list[AgentView],
-    abstained: list[AgentView],
+    abstained: list[AgentView], *,
+    raw: float = 0.0, blended: float = 0.0, brakes: list[AgentView] | None = None,
 ) -> str:
     """The user-facing explanation, built from the views that set the score."""
     lines = [f"{action} — confidence {confidence:.0f}%", "", "Reason:"]
     for view in sorted(contributing, key=lambda v: abs(v.score or 0), reverse=True):
         for reason in view.reasons:
             lines.append(f"• {reason}")
+
+    # If a brake changed the answer, say so — a user must never see a call
+    # softened by something the explanation didn't mention.
+    if brakes and raw > 0 and blended < raw - 0.05:
+        held_back = ", ".join(sorted(v.agent.replace("_", " ") for v in brakes))
+        downgraded = _action(raw) != action
+        lines.append("")
+        lines.append(
+            f"• The case on its own scores {raw:.0f}; portfolio exposure "
+            f"({held_back}) holds it back to {blended:.0f}"
+            + (f", which is a {action} rather than a {_action(raw)}."
+               if downgraded else ".")
+        )
+        lines.append("  This limits adding to the position. It is not a reason to sell.")
+
     if abstained:
         lines.append("")
         lines.append("Not considered:")
