@@ -29,7 +29,7 @@ LEARNING_RATE = 0.35     # how far toward the evidence a weight moves per run
 # Agents that do not forecast a direction. Their contribution is real but it
 # is not a prediction, so comparing their sign against the price move measures
 # nothing — see the `directional` flag on the Agent protocol.
-NON_DIRECTIONAL = {"portfolio_risk"}
+NON_DIRECTIONAL = {"portfolio_risk", "cross_market", "diversification"}
 
 
 def review(recommendation: dict[str, Any], outcome: dict[str, Any],

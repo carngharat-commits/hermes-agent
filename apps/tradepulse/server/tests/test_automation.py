@@ -237,3 +237,113 @@ def test_a_cycle_leaves_recommendations_the_ui_can_read(client: TestClient):
     recs = client.get("/api/intel/recommendations").json()["recommendations"]
     assert len(recs) == 3
     assert all(r["reasoning"] for r in recs)
+
+
+# --- the price feed behind unattended cycles -------------------------------
+
+from tradepulse_server.intel.prices import (  # noqa: E402
+    KitePriceSource, PriceFeed, StoredPriceSource,
+)
+from tradepulse_server.kite import KiteError, StubKiteClient  # noqa: E402
+
+
+def test_stored_source_replays_the_newest_mark(service: IntelService):
+    service.store.record_price("RELIANCE", 100.0, observed_at="2026-01-01T00:00:00+00:00")
+    service.store.record_price("RELIANCE", 140.0, observed_at="2026-02-01T00:00:00+00:00")
+    prices = asyncio.run(StoredPriceSource(service.store).quote(["RELIANCE", "MISSING"]))
+    assert prices == {"RELIANCE": 140.0}
+
+
+def test_a_feed_with_no_promoted_session_uses_stored_marks(service: IntelService):
+    feed = PriceFeed(service.store, StubKiteClient())
+    assert feed.live is False
+    assert feed.source().name == "stored"
+
+
+def test_promotion_switches_the_feed_to_live_quotes(service: IntelService):
+    feed = PriceFeed(service.store, StubKiteClient())
+    feed.promote("a-token", "AB1234")
+    assert feed.live is True
+    assert feed.source().name == "kite"
+    assert feed.status()["promoted_user"] == "AB1234"
+
+
+def test_promotion_is_revocable(service: IntelService):
+    feed = PriceFeed(service.store, StubKiteClient())
+    feed.promote("a-token")
+    feed.revoke()
+    assert feed.live is False
+    assert feed.source().name == "stored"
+
+
+def test_live_quotes_are_parsed_off_the_exchange_prefixed_keys(service: IntelService):
+    class Quoting(StubKiteClient):
+        async def get(self, path, access_token):
+            assert "i=NSE:RELIANCE" in path
+            return {"NSE:RELIANCE": {"last_price": 1275.9},
+                    "NSE:TCS": {"last_price": 2034.05}}
+
+    source = KitePriceSource(Quoting(), "token")
+    assert asyncio.run(source.quote(["RELIANCE", "TCS"])) == {
+        "RELIANCE": 1275.9, "TCS": 2034.05,
+    }
+
+
+def test_a_failing_quote_batch_does_not_cost_the_cycle_its_prices(service: IntelService):
+    class Broken(StubKiteClient):
+        async def get(self, path, access_token):
+            raise KiteError("quote unavailable", status=503)
+
+    assert asyncio.run(KitePriceSource(Broken(), "token").quote(["RELIANCE"])) == {}
+
+
+def test_an_expired_token_degrades_to_stored_marks_rather_than_nothing(
+    service: IntelService,
+):
+    """Kite tokens die at ~6am IST; an unattended cycle must not go blind."""
+    service.store.record_price("RELIANCE", 111.0)
+
+    class Expired(StubKiteClient):
+        async def get(self, path, access_token):
+            raise KiteError("token expired", status=403)
+
+    feed = PriceFeed(service.store, Expired())
+    feed.promote("stale-token")
+    assert asyncio.run(feed.quote(["RELIANCE"])) == {"RELIANCE": 111.0}
+
+
+# --- promotion over HTTP --------------------------------------------------
+
+def test_promotion_requires_a_session(client: TestClient):
+    assert client.post("/api/intel/price-feed/promote").status_code == 401
+
+
+def connect(client: TestClient) -> None:
+    """Walk the stub OAuth handshake without following redirects off-app."""
+    login = client.get("/api/kite/login", follow_redirects=False)
+    client.get(login.headers["location"], follow_redirects=False)
+
+
+def test_promoting_and_revoking_over_http(client: TestClient):
+    connect(client)
+    body = client.post("/api/intel/price-feed/promote").json()
+    assert body["promoted"] is True
+    assert client.get("/api/intel/price-feed").json()["live"] is True
+
+    client.post("/api/intel/price-feed/revoke")
+    assert client.get("/api/intel/price-feed").json()["live"] is False
+
+
+def test_logging_out_revokes_the_promotion(client: TestClient):
+    """A promoted token belongs to the session that granted it."""
+    connect(client)
+    client.post("/api/intel/price-feed/promote")
+    assert client.get("/api/intel/price-feed").json()["live"] is True
+
+    client.post("/api/kite/logout")
+    assert client.get("/api/intel/price-feed").json()["live"] is False
+
+
+def test_run_history_reports_which_price_source_is_in_use(client: TestClient):
+    body = client.get("/api/intel/runs").json()
+    assert body["price_feed"]["source"] == "stored"

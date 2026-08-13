@@ -26,7 +26,10 @@ def test_coverage_reports_provider_symbols_and_agent_state(client: TestClient):
     body = client.get("/api/intel/coverage").json()
     assert body["provider"] == "stub"
     assert "RELIANCE" in body["symbols"]
-    assert set(body["agents"]["active"]) == {"fundamental", "technical", "portfolio_risk"}
+    assert set(body["agents"]["active"]) == {
+        "fundamental", "technical", "portfolio_risk",
+        "cross_market", "diversification",
+    }
     # The unwired agents are advertised with what they need, not hidden.
     pending = {a["agent"]: a["needs"] for a in body["agents"]["pending"]}
     assert set(pending) == {"news", "sentiment", "macro"}

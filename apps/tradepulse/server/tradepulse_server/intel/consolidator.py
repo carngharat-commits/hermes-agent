@@ -23,6 +23,8 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "fundamental": 1.0,
     "technical": 0.6,
     "portfolio_risk": 0.8,
+    "cross_market": 0.5,
+    "diversification": 0.5,
     "news": 0.7,
     "sentiment": 0.4,
     "macro": 0.6,

@@ -70,13 +70,16 @@ class IntelService:
         result = self.valuation_for(symbol, market_price)
         history = [p["price"] for p in self.store.price_series(symbol)]
 
+        book = holdings or []
         context = Context(
             symbol=symbol,
             market_price=market_price,
             fundamentals=fundamentals,
             valuation=result,
             price_history=history,
-            holdings=holdings or [],
+            holdings=book,
+            peer_history=self._peer_history(symbol, book),
+            sectors=self._sectors(symbol, book),
         )
         views = await self.layer.gather_async(context)
 
@@ -95,6 +98,41 @@ class IntelService:
 
         recommendation["agent_views"] = [v.as_row(symbol) for v in views]
         return recommendation
+
+    def _peer_history(
+        self, symbol: str, holdings: list[dict[str, Any]]
+    ) -> dict[str, list[float]]:
+        """Recorded price paths for the *other* names in the book.
+
+        Only names the app has actually been marking appear here — a holding
+        with no recorded series contributes nothing, and the correlation agent
+        abstains rather than correlating against a stub.
+        """
+        peers: dict[str, list[float]] = {}
+        for row in holdings:
+            peer = str(row.get("sym") or "").upper()
+            if not peer or peer == symbol.upper() or peer in peers:
+                continue
+            series = [p["price"] for p in self.store.price_series(peer)]
+            if series:
+                peers[peer] = series
+        return peers
+
+    def _sectors(self, symbol: str, holdings: list[dict[str, Any]]) -> dict[str, str]:
+        """Sector per symbol, for whatever the provider covers.
+
+        Uncovered holdings are simply absent; the diversification agent groups
+        them under "Unclassified" rather than pretending to know.
+        """
+        wanted = {symbol.upper()} | {
+            str(row.get("sym") or "").upper() for row in holdings if row.get("sym")
+        }
+        sectors: dict[str, str] = {}
+        for name in wanted:
+            fundamentals = self.provider.fetch(name)
+            if fundamentals is not None and fundamentals.sector:
+                sectors[name] = fundamentals.sector
+        return sectors
 
     def history(self, symbol: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
         return self.store.recommendations(symbol, limit)

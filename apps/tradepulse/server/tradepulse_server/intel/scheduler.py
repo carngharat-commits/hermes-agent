@@ -95,6 +95,11 @@ class CycleScheduler:
 
             try:
                 payload = self.context()
+                refresh = payload.get("refresh")
+                if refresh is not None:
+                    # Quote fresh prices before the cycle rather than reusing
+                    # whatever the last one left behind.
+                    payload = {**payload, "prices": await refresh()}
                 result = await self.orchestrator.run_cycle(
                     prices=payload.get("prices"),
                     holdings=payload.get("holdings"),

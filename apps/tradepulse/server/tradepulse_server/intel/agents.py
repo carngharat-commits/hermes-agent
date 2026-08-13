@@ -72,6 +72,10 @@ class Context:
     price_history: list[float] = field(default_factory=list)
     holdings: list[dict[str, Any]] = field(default_factory=list)
     news: list[dict[str, Any]] = field(default_factory=list)
+    # Price history for the other holdings, for cross-market correlation.
+    peer_history: dict[str, list[float]] = field(default_factory=dict)
+    # symbol -> sector, for the diversification read.
+    sectors: dict[str, str] = field(default_factory=dict)
 
 
 class Agent(Protocol):
@@ -238,6 +242,178 @@ class PortfolioRiskAgent:
         )
 
 
+# ------------------------------------------------------------ cross-market
+
+class CrossMarketAgent:
+    """How much this name already moves with the rest of the book.
+
+    First slice of the spec's multi-market intelligence, and the cheapest one:
+    correlation needs no external feed, only the price history already being
+    recorded. Two names that move together are one position wearing two names,
+    which is exactly the exposure a holdings table hides.
+
+    Non-directional. High correlation says "you have less diversification than
+    the row count suggests", not "this will fall".
+    """
+
+    name = "cross_market"
+    directional = False
+    MIN_OVERLAP = 20          # paired observations before a correlation means anything
+    HIGH = 0.75
+
+    def evaluate(self, context: Context) -> AgentView:
+        peers = context.peer_history or {}
+        own = context.price_history
+        if len(own) < self.MIN_OVERLAP or not peers:
+            return abstain(
+                self.name,
+                f"Need {self.MIN_OVERLAP} overlapping marks against at least one "
+                f"other holding; have {len(own)} and {len(peers)} peer(s).",
+            )
+
+        correlations: dict[str, float] = {}
+        for symbol, series in peers.items():
+            if symbol == context.symbol:
+                continue
+            value = _correlation(own, series)
+            if value is not None:
+                correlations[symbol] = round(value, 3)
+
+        if not correlations:
+            return abstain(self.name, "No peer series long enough to correlate against.")
+
+        highest = max(correlations.items(), key=lambda kv: kv[1])
+        average = sum(correlations.values()) / len(correlations)
+        tight = {s: c for s, c in correlations.items() if c >= self.HIGH}
+
+        # Only penalise; low correlation is a neutral fact, not a buy signal.
+        score = -SCALE * min(1.0, max(0.0, (average - 0.3) / 0.5)) if average > 0.3 else 0.0
+
+        reasons = [
+            f"Average correlation with the rest of the book is {average:+.2f}.",
+            f"Closest mover is {highest[0]} at {highest[1]:+.2f}.",
+        ]
+        if tight:
+            reasons.append(
+                f"Moves almost in lockstep with {', '.join(sorted(tight))} — "
+                "these are close to one position, not several."
+            )
+
+        return AgentView(
+            agent=self.name,
+            stance=_stance(score),
+            score=round(score, 1),
+            confidence=round(min(75.0, 35 + len(correlations) * 5), 1),
+            summary=f"{average:+.2f} average correlation across "
+                    f"{len(correlations)} holding(s).",
+            reasons=tuple(reasons),
+            detail={"average": round(average, 3), "correlations": correlations,
+                    "tightly_coupled": sorted(tight)},
+        )
+
+
+def _correlation(a: list[float], b: list[float]) -> float | None:
+    """Pearson correlation of the two series' returns, on their common tail.
+
+    Returns, not levels: two unrelated stocks that both drifted up over a year
+    correlate near 1.0 on price and near 0 on daily moves, and it is the moves
+    that tell you whether they fall together.
+    """
+    size = min(len(a), len(b))
+    if size < CrossMarketAgent.MIN_OVERLAP:
+        return None
+    left, right = a[-size:], b[-size:]
+
+    def returns(series: list[float]) -> list[float]:
+        return [
+            (series[i] - series[i - 1]) / series[i - 1]
+            for i in range(1, len(series)) if series[i - 1]
+        ]
+
+    x, y = returns(left), returns(right)
+    if len(x) != len(y) or len(x) < 2:
+        return None
+
+    mean_x, mean_y = sum(x) / len(x), sum(y) / len(y)
+    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+    var_x = sum((xi - mean_x) ** 2 for xi in x)
+    var_y = sum((yi - mean_y) ** 2 for yi in y)
+    if var_x <= 0 or var_y <= 0:
+        return None
+    return cov / (var_x * var_y) ** 0.5
+
+
+# ---------------------------------------------------------- diversification
+
+class DiversificationAgent:
+    """Sector concentration, which single-name weight cannot see.
+
+    First slice of the spec's portfolio intelligence. A book of twenty names
+    that are all banks is not diversified, and the risk agent — which only
+    looks at one row's weight — will happily wave every one of them through.
+
+    Non-directional, like the risk brake.
+    """
+
+    name = "diversification"
+    directional = False
+    HEAVY_SECTOR = 0.35        # a third of the book in one sector
+
+    def evaluate(self, context: Context) -> AgentView:
+        sectors = context.sectors or {}
+        holdings = context.holdings
+        if not holdings or not sectors:
+            return abstain(self.name, "No holdings or no sector data to group by.")
+
+        own_sector = sectors.get(context.symbol)
+        if not own_sector:
+            return abstain(self.name, f"No sector known for {context.symbol}.")
+
+        weights: dict[str, float] = {}
+        total = 0.0
+        for row in holdings:
+            value = float(row.get("qty") or 0) * float(row.get("ltp") or 0)
+            if value <= 0:
+                continue
+            total += value
+            sector = sectors.get(str(row.get("sym", "")).upper(), "Unclassified")
+            weights[sector] = weights.get(sector, 0.0) + value
+
+        if total <= 0:
+            return abstain(self.name, "Portfolio has no valued positions.")
+
+        shares = {s: v / total for s, v in weights.items()}
+        own_share = shares.get(own_sector, 0.0)
+
+        score = (
+            -SCALE * min(1.0, (own_share - self.HEAVY_SECTOR) / self.HEAVY_SECTOR)
+            if own_share > self.HEAVY_SECTOR else 0.0
+        )
+
+        reasons = [
+            f"{own_sector} is {own_share:.0%} of the book across "
+            f"{sum(1 for r in holdings if sectors.get(str(r.get('sym','')).upper()) == own_sector)} "
+            f"holding(s)."
+        ]
+        if own_share > self.HEAVY_SECTOR:
+            reasons.append(
+                f"Above the {self.HEAVY_SECTOR:.0%} sector threshold — adding here "
+                "concentrates an exposure the row count already understates."
+            )
+        reasons.append(f"Book spans {len(shares)} sector(s).")
+
+        return AgentView(
+            agent=self.name,
+            stance=_stance(score),
+            score=round(score, 1),
+            confidence=round(min(80.0, 40 + len(shares) * 5), 1),
+            summary=f"{own_sector} at {own_share:.0%} of the book.",
+            reasons=tuple(reasons),
+            detail={"sector": own_sector, "sector_share": round(own_share, 4),
+                    "sector_weights": {s: round(v, 4) for s, v in sorted(shares.items())}},
+        )
+
+
 # ------------------------------------------------- awaiting feeds and a model
 
 class _PendingAgent:
@@ -276,6 +452,8 @@ DETERMINISTIC_AGENTS: tuple[Agent, ...] = (
     FundamentalResearchAgent(),
     TechnicalAnalysisAgent(),
     PortfolioRiskAgent(),
+    CrossMarketAgent(),
+    DiversificationAgent(),
 )
 
 PENDING_AGENTS: tuple[Agent, ...] = (

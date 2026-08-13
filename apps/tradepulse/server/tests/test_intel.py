@@ -455,3 +455,164 @@ def test_agents_declare_whether_they_forecast():
     assert FundamentalResearchAgent.directional is True
     assert TechnicalAnalysisAgent.directional is True
     assert PortfolioRiskAgent.directional is False
+
+
+# --- cross-market correlation ----------------------------------------------
+
+def _walk(start: float, moves: list[float]) -> list[float]:
+    """A price path from a list of returns."""
+    path = [start]
+    for move in moves:
+        path.append(round(path[-1] * (1 + move), 4))
+    return path
+
+
+def test_correlation_is_measured_on_returns_not_levels():
+    """Two names that merely both drifted up are not the same position.
+
+    On levels they correlate near 1.0; on returns — which is what tells you
+    whether they fall together — they don't.
+    """
+    from tradepulse_server.intel.agents import _correlation
+
+    up_a = _walk(100, [0.02, -0.01] * 15)
+    up_b = _walk(500, [-0.01, 0.02] * 15)     # also drifts up, moves opposite
+    assert _correlation(up_a, up_b) < 0
+
+    together = _walk(300, [0.02, -0.01] * 15)  # same moves as up_a
+    assert _correlation(up_a, together) > 0.99
+
+
+def test_cross_market_penalises_a_book_that_moves_as_one():
+    from tradepulse_server.intel.agents import CrossMarketAgent
+
+    moves = [0.02, -0.015, 0.01, -0.005] * 8
+    view = CrossMarketAgent().evaluate(Context(
+        symbol="A", market_price=100,
+        price_history=_walk(100, moves),
+        peer_history={"B": _walk(250, moves), "C": _walk(80, moves)},
+    ))
+    assert view.score < -50
+    assert view.stance == "BEARISH"
+    assert "B" in view.detail["tightly_coupled"] and "C" in view.detail["tightly_coupled"]
+
+
+def test_cross_market_stays_out_of_the_way_when_the_book_is_uncorrelated():
+    """Low correlation is a neutral fact, not a reason to buy."""
+    from tradepulse_server.intel.agents import CrossMarketAgent
+
+    view = CrossMarketAgent().evaluate(Context(
+        symbol="A", market_price=100,
+        price_history=_walk(100, [0.02, -0.02] * 16),
+        peer_history={"B": _walk(250, [0.01, 0.01, -0.03, 0.005] * 8)},
+    ))
+    assert view.score <= 0        # it can only ever penalise
+
+
+def test_cross_market_abstains_without_enough_overlap():
+    from tradepulse_server.intel.agents import CrossMarketAgent
+
+    view = CrossMarketAgent().evaluate(Context(
+        symbol="A", market_price=100,
+        price_history=[100.0] * 5,
+        peer_history={"B": [50.0] * 5},
+    ))
+    assert view.abstained and "20" in view.summary
+
+
+# --- sector diversification -------------------------------------------------
+
+BANK_BOOK = [
+    {"sym": "AXISBANK", "qty": 100, "ltp": 1000},
+    {"sym": "CANBK", "qty": 100, "ltp": 1000},
+    {"sym": "TCS", "qty": 10, "ltp": 1000},
+]
+
+
+def test_diversification_sees_a_sector_the_single_name_weight_hides():
+    """No one name is heavy, yet two thirds of the book is one sector."""
+    from tradepulse_server.intel.agents import DiversificationAgent, PortfolioRiskAgent
+
+    context = Context(
+        symbol="AXISBANK", market_price=1000, holdings=BANK_BOOK,
+        sectors={"AXISBANK": "Banking", "CANBK": "Banking", "TCS": "IT"},
+    )
+    assert DiversificationAgent().evaluate(context).score < -50
+    # The concentration brake waves it through — it only reads one row.
+    assert PortfolioRiskAgent().evaluate(context).score < 0  # 47% of the book
+    assert DiversificationAgent().evaluate(context).detail["sector_share"] > 0.6
+
+
+def test_diversification_is_quiet_on_a_spread_book():
+    from tradepulse_server.intel.agents import DiversificationAgent
+
+    view = DiversificationAgent().evaluate(Context(
+        symbol="TCS", market_price=1000,
+        holdings=[{"sym": s, "qty": 10, "ltp": 1000}
+                  for s in ("TCS", "AXISBANK", "RELIANCE", "TITAN")],
+        sectors={"TCS": "IT", "AXISBANK": "Banking",
+                 "RELIANCE": "Energy", "TITAN": "Consumer"},
+    ))
+    assert view.score == 0.0
+    assert view.detail["sector_share"] == 0.25
+
+
+def test_diversification_abstains_rather_than_guessing_a_sector():
+    from tradepulse_server.intel.agents import DiversificationAgent
+
+    view = DiversificationAgent().evaluate(Context(
+        symbol="UNKNOWN", market_price=10, holdings=BANK_BOOK,
+        sectors={"AXISBANK": "Banking"},
+    ))
+    assert view.abstained and "UNKNOWN" in view.summary
+
+
+def test_both_new_brakes_are_non_directional():
+    """They say 'you already own this exposure', not 'this will fall'."""
+    from tradepulse_server.intel.agents import CrossMarketAgent, DiversificationAgent
+
+    assert CrossMarketAgent.directional is False
+    assert DiversificationAgent.directional is False
+    assert {"cross_market", "diversification"} <= learning.NON_DIRECTIONAL
+
+
+# --- the service actually feeds them ---------------------------------------
+# Both agents were wired into the ensemble before anything populated their
+# inputs, so they abstained in every real run while the unit tests above
+# passed. This is the test that would have caught that.
+
+def test_service_populates_peer_history_and_sectors(service: IntelService):
+    book = [
+        {"sym": "AXISBANK", "qty": 100, "ltp": 1000},
+        {"sym": "CANBK", "qty": 100, "ltp": 1000},
+        {"sym": "TCS", "qty": 10, "ltp": 3000},
+    ]
+    moves = [0.015, -0.01, 0.02, -0.005] * 8
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for symbol, path in (("AXISBANK", _walk(1000, moves)),
+                         ("CANBK", _walk(400, moves)),
+                         ("TCS", _walk(3000, moves))):
+        for day, price in enumerate(path):
+            # Marks are keyed by (symbol, observed_at); one per day, or they
+            # collapse into a single row.
+            service.store.record_price(
+                symbol, price,
+                observed_at=(base + timedelta(days=day)).isoformat(),
+            )
+
+    rec = asyncio.run(service.recommend("AXISBANK", 1000.0, holdings=book))
+    views = {v["agent"]: v for v in rec["agent_views"]}
+
+    assert not views["cross_market"]["detail"].get("abstained"), \
+        views["cross_market"]["summary"]
+    assert set(views["cross_market"]["detail"]["correlations"]) == {"CANBK", "TCS"}
+
+    assert not views["diversification"]["detail"].get("abstained"), \
+        views["diversification"]["summary"]
+    assert views["diversification"]["detail"]["sector"] == "Banking"
+    # Both banks group together even though neither row alone is heavy.
+    assert views["diversification"]["detail"]["sector_share"] > 0.6
+
+    # And the explanation names them, per the spec's no-unexplained-AI rule.
+    assert "correlation" in rec["reasoning"].lower()
+    assert "banking" in rec["reasoning"].lower()

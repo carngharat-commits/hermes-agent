@@ -20,6 +20,7 @@ from .cache import TTLCache
 from .config import Settings, load_settings
 from .intel.agents import DETERMINISTIC_AGENTS, PENDING_AGENTS
 from .intel.orchestrator import Orchestrator
+from .intel.prices import PriceFeed
 from .intel.scheduler import CycleScheduler
 from .intel.service import IntelService
 from .intel.store import IntelStore
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else StubKiteClient()
     )
 
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         app.state.scheduler.start()
@@ -65,12 +67,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # default in-memory database keeps tests and demos self-contained.
     app.state.intel = IntelService(store=IntelStore(settings.intel_db_path))
     app.state.orchestrator = Orchestrator(app.state.intel)
-    # The scheduler reads prices and holdings at fire time. Nothing feeds it
-    # yet — a Kite session is per-browser, not per-process — so cycles run
-    # over stored marks until a background price source exists. Documented in
-    # server/README.md rather than faked.
+    app.state.prices = PriceFeed(app.state.intel.store, client)
+
+    async def refresh_cycle_inputs() -> dict[str, float]:
+        """Quote the covered book so the next cycle has something current."""
+        symbols = app.state.intel.covered_symbols()
+        prices = await app.state.prices.quote(symbols)
+        app.state.cycle_prices = prices
+        return prices
+
+    app.state.refresh_cycle_inputs = refresh_cycle_inputs
+
+    def cycle_context() -> dict[str, Any]:
+        """Read at fire time, not at startup, so each cycle sees today's state."""
+        return {
+            "prices": app.state.cycle_prices,
+            "holdings": app.state.cycle_holdings,
+            "refresh": app.state.refresh_cycle_inputs,
+        }
+
+    app.state.cycle_prices = {}
+    app.state.cycle_holdings = []
     app.state.scheduler = CycleScheduler(
-        app.state.orchestrator, settings.intel_cycle_seconds
+        app.state.orchestrator, settings.intel_cycle_seconds, context=cycle_context
     )
 
     # The Vite dev server proxies /api, so the browser is same-origin in the
@@ -199,6 +218,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Cached reads outlive the session otherwise, and a later login
         # reusing the id would serve the previous user's book.
         app.state.cache.invalidate_prefix(f"{session_cookie}:")
+        # A promoted token belongs to the session that granted it.
+        if session is not None:
+            app.state.prices.revoke()
         response = JSONResponse({"authenticated": False})
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
@@ -383,18 +405,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def intel_run(payload: dict[str, Any] | None = None) -> Any:
         """Run one full cycle now, rather than waiting for the scheduler."""
         payload = payload or {}
+        supplied = {str(k).upper(): float(v)
+                    for k, v in (payload.get("prices") or {}).items()}
+        # No prices given: quote them rather than silently re-scoring old marks.
+        prices = supplied or await refresh_cycle_inputs()
         result = await app.state.orchestrator.run_cycle(
-            prices={str(k).upper(): float(v)
-                    for k, v in (payload.get("prices") or {}).items()},
+            prices=prices,
             holdings=payload.get("holdings") or [],
             trigger="manual",
         )
         return result.as_dict()
 
+    @app.post("/api/intel/price-feed/promote")
+    async def promote_price_feed(
+        store: SessionStore = Depends(current_store),
+        session_cookie: str | None = Cookie(default=None, alias="tradepulse_session"),
+    ) -> Any:
+        """Let unattended cycles quote using this browser session's token.
+
+        Explicit and revocable on purpose. A background job silently borrowing
+        whichever session logged in last would be a surprise, and the token it
+        borrows is a bearer credential for the whole trading account.
+        """
+        session = store.get(session_cookie)
+        if session is None:
+            return _unauthenticated()
+        app.state.prices.promote(session.access_token, session.user_id)
+        return {"promoted": True, **app.state.prices.status()}
+
+    @app.post("/api/intel/price-feed/revoke")
+    async def revoke_price_feed() -> Any:
+        app.state.prices.revoke()
+        return {"promoted": False, **app.state.prices.status()}
+
+    @app.get("/api/intel/price-feed")
+    async def price_feed_status() -> Any:
+        return app.state.prices.status()
+
     @app.get("/api/intel/runs")
     async def intel_runs(limit: int = 50) -> Any:
         return {
             "scheduler": app.state.scheduler.status(),
+            "price_feed": app.state.prices.status(),
             "runs": app.state.intel.store.runs(limit),
         }
 
