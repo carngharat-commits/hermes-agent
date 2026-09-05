@@ -7,6 +7,7 @@ server/README.md for what step 2 has to replace.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -33,6 +34,7 @@ from .mapping import (
     map_positions,
     summarize,
 )
+from .ai import AIChat, build_client
 from .auth import OPEN_PATHS, AuthStore, passcode_matches, resolve_passcode
 from .sessions import SessionStore, issue_state, verify_state
 
@@ -63,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = store
     app.state.auth = AuthStore()
+    app.state.ai = AIChat(build_client(settings.anthropic_api_key), settings.ai_model)
     app.state.passcode = resolve_passcode(settings.passcode, required=settings.auth_required)
     app.state.kite = client
     app.state.cache = TTLCache()
@@ -229,6 +232,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(cfg.auth_cookie_name, path="/")
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
+
+    # -- AI chat, server-side ---------------------------------------------
+
+    @app.get("/api/ai/status")
+    async def ai_status() -> dict[str, Any]:
+        return app.state.ai.status()
+
+    @app.post("/api/ai/chat")
+    async def ai_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        """One reply for the drawer. The key and the system prompt stay here."""
+        context = str(payload.get("context") or "")
+        history = payload.get("messages") or []
+        if not isinstance(history, list):
+            history = []
+        # The SDK call is blocking; keep it off the event loop.
+        reply = await asyncio.to_thread(app.state.ai.reply, context, history)
+        return reply.as_dict()
 
     @app.get("/api/kite/status")
     async def status(cfg: Settings = Depends(current_settings)) -> dict[str, Any]:

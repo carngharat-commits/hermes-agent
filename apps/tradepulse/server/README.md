@@ -52,6 +52,8 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 | `GET /api/auth/session` | Whether this browser is signed in to the app |
 | `POST /api/auth/login` | Sign in with `TRADEPULSE_PASSCODE`; sets the auth cookie |
 | `POST /api/auth/logout` | Sign out, and drop the broker session with it |
+| `GET /api/ai/status` | Whether a model is configured for the chat drawer |
+| `POST /api/ai/chat` | One reply for the drawer; key and prompt stay server-side |
 | `GET /api/kite/status` | Whether real credentials are configured |
 | `GET /api/kite/login` | Step 1 — redirect into the Kite login |
 | `GET /api/kite/callback` | Steps 2–4 — verify, exchange, set cookie, bounce back |

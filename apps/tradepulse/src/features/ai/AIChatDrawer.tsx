@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronRight, Info, Sparkles, X } from "lucide-react";
 
+import { chat } from "@/api/ai";
 import { Btn } from "@/components/ui/Btn";
 import { ChatBubble } from "@/features/ai/ChatBubble";
 import { FONT_BODY, FONT_MONO, T } from "@/theme/tokens";
@@ -21,25 +22,7 @@ export const AIChatDrawer = ({ context, onClose }: any) => {
     ? `${d.sym} · ${d.action} · ${d.timeframe}`
     : `${d.sym} · ${d.category} · Confidence ${d.confidence}`;
 
-  const SYSTEM_PROMPT = `You are an embedded market analyst inside TradePulse, a portfolio decision-support app for an Indian retail investor. The user may hold a diversified book across Indian equities, US equities, mutual funds, crypto and digital metals through several brokers.
-
-Your job on this screen:
-- Explain the reasoning behind a specific trading signal or opportunity in plain terms
-- Discuss what current market/macro conditions are influencing it (Fed path, crude, RBI, USD/INR, sector rotation, geopolitics)
-- Think through future scenarios: "if X prevails, then Y is likely; here's what to watch and what precautions to take"
-- Always frame invalidation triggers — "this thesis breaks if..."
-- Reference the three axes explicitly: Technical (chart), Fundamental (business), Macro (news/policy/rates)
-- Stay SEBI-compliant: decision-support, never direct investment advice
-
-Response style:
-- Concise, structured, real numbers where relevant
-- 2-4 short paragraphs typically, use lists only if necessary
-- Speak with warmth but professional
-- Acknowledge uncertainty honestly; don't overclaim
-- If the question is unclear, ask one clarifying question
-
-Never say "as an AI I can't advise" — instead give framing and discussion.`;
-
+  // The system prompt lives on the server (server/tradepulse_server/ai.py).
   const contextMessage = isSignal
     ? `Here is the current signal I'm looking at:
 
@@ -100,29 +83,14 @@ Current market context (30 July 2026): Nifty 24,812 (+0.73%), IndiaVIX 13.4, USD
     setLoading(true);
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          system: SYSTEM_PROMPT,
-          messages: [
-            { role: "user", content: contextMessage },
-            { role: "assistant", content: "Got the context. Ask me anything about this call — the reasoning, current conditions affecting it, or future scenarios to watch." },
-            ...newMsgs,
-          ],
-        }),
-      });
-      const data = await response.json();
-      let reply = "";
-      if (data.content && Array.isArray(data.content)) {
-        reply = data.content.filter(c => c.type === "text").map(c => c.text).join("\n").trim();
-      }
-      if (!reply) reply = "I couldn't generate a response — try rephrasing?";
+      // The backend holds the key and the system prompt. The browser sends
+      // only what it can see: the context block and the conversation.
+      const data = await chat(contextMessage, newMsgs);
+      const reply = data.reply
+        ?? (data.reason || "I couldn't generate a response — try rephrasing?");
       setMessages([...newMsgs, { role: "assistant", content: reply }]);
     } catch (err) {
-      setMessages([...newMsgs, { role: "assistant", content: `Couldn't reach the model. ${err.message || "Try again in a moment."}` }]);
+      setMessages([...newMsgs, { role: "assistant", content: `Couldn't reach the server. ${err.message || "Try again in a moment."}` }]);
     } finally {
       setLoading(false);
     }

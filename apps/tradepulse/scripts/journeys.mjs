@@ -52,6 +52,7 @@ async function main() {
   await journeyPhotoIsNotClaimedToBeRead();
   await journeyEveryAICallIsExplainable();
   await journeyWatchlistShowsIntelligenceOnlyWhenPriced();
+  await journeyAIChatNeverLeavesTheServer();
 
   check("no uncaught page errors during any journey", crashes.length === 0,
     crashes.join("\n         "));
@@ -493,6 +494,43 @@ async function journeyWatchlistShowsIntelligenceOnlyWhenPriced() {
     priced.slice(0, 300));
   check("priced row compares the target to intrinsic value",
     /your target is/i.test(priced), priced.slice(0, 400));
+}
+
+// The drawer used to call Anthropic straight from the page: no key meant a
+// failure, and a key would have shipped in the bundle to everyone. The call
+// now goes through the backend. With no key on this test server the drawer
+// must say so in words — and no request may leave for api.anthropic.com.
+async function journeyAIChatNeverLeavesTheServer() {
+  console.log("\n— the AI chat goes through the server, never the browser —");
+  const leaks = [];
+  const onRequest = (req) => { if (/anthropic\.com/.test(req.url())) leaks.push(req.url()); };
+  page.on("request", onRequest);
+
+  await openTab("Signals");
+  // The actions row lives inside the expanded card.
+  const reveal = page.getByRole("button", { name: /See reasoning/ }).first();
+  if (await reveal.count()) { await reveal.scrollIntoViewIfNeeded(); await reveal.click(); await page.waitForTimeout(300); }
+  const ask = page.getByRole("button", { name: /Ask AI/ }).first();
+  if (await ask.count() === 0) {
+    console.log("       skipped — no Ask AI entry point on the Signals tab");
+    page.off("request", onRequest);
+    return;
+  }
+  await ask.scrollIntoViewIfNeeded();
+  await ask.click();
+  await page.waitForTimeout(500);
+  const box = page.locator(`${SHEET} input, ${SHEET} textarea`).first();
+  check("the chat drawer opens with an input", await box.count() === 1);
+  await box.fill("Why this call now?");
+  await box.press("Enter");
+  await page.waitForTimeout(1500);
+
+  const body = await page.locator(SHEET).innerText();
+  check("without a server key the drawer says so, in words",
+    /not configured on this server|ANTHROPIC_API_KEY/i.test(body), body.slice(-300));
+  check("no request left the page for api.anthropic.com", leaks.length === 0, leaks.join(", "));
+  page.off("request", onRequest);
+  await closeSheet();
 }
 
 function report() {

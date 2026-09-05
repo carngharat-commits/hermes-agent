@@ -164,6 +164,17 @@ The published prototype has no backend, so it cannot sign anyone in and has
 nothing private behind it. It offers a read-only preview and says so on
 screen the whole time.
 
+## The AI chat is answered by the server
+
+The "Ask AI" drawer on signals and opportunities used to call Anthropic's API
+straight from the page. With no key that fails; with a key the key would ship
+in the bundle to everyone who loads it. The call now goes through
+`POST /api/ai/chat`: the key is read from `ANTHROPIC_API_KEY` on the server,
+the system prompt lives in `server/tradepulse_server/ai.py`, and the browser
+sends only the context block and the conversation. With no key configured the
+drawer says so in words rather than failing, and nothing else on the screen
+depends on it.
+
 ## The book starts empty
 
 The first version shipped a real person's holdings as bundled constants that

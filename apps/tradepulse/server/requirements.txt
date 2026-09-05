@@ -5,5 +5,9 @@ uvicorn[standard]==0.41.0
 starlette==1.0.1
 httpx==0.28.1
 
+# The AI chat drawer's model calls, made server-side so the key never
+# reaches the browser.
+anthropic==1.4.0
+
 # tests
 pytest==9.0.2
