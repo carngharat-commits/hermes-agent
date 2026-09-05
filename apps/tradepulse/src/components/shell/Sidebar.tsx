@@ -6,9 +6,16 @@ import { Activity } from "lucide-react";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { NAV, NAV_GROUPS } from "@/components/shell/nav";
 import { Pill } from "@/components/ui/Pill";
-import { USER } from "@/lib/constants";
+import { initialsOf, useAuth } from "@/data/auth";
 
-export const Sidebar = ({ view, setView, mobileOpen, closeMobile }: any) => (
+const identity = (status: string, name?: string) =>
+  status === "preview" ? { name: "Preview", handle: "no backend" }
+  : { name: name ?? "Investor", handle: status === "authenticated" ? "signed in" : "not signed in" };
+
+export const Sidebar = ({ view, setView, mobileOpen, closeMobile }: any) => {
+  const { status, user } = useAuth();
+  const who = identity(status, user?.name);
+  return (
   <>
     {/* Mobile overlay */}
     {mobileOpen && <div className="fixed inset-0 z-30 lg:hidden" style={{ background: "rgba(0,0,0,0.6)" }} onClick={closeMobile} />}
@@ -61,13 +68,14 @@ export const Sidebar = ({ view, setView, mobileOpen, closeMobile }: any) => (
       <div className="absolute bottom-0 inset-x-0 px-3 py-3" style={{ borderTop: `1px solid ${T.sidebarBorder}` }}>
         <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg" style={{ background: T.card2 }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold"
-            style={{ background: T.primary, color: "#000" }}>{USER.initials}</div>
+            style={{ background: T.primary, color: "#000" }}>{initialsOf(who.name)}</div>
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-semibold truncate" style={{ color: T.fg }}>{USER.name}</div>
-            <div className="text-[10px] truncate" style={{ color: T.fgMute, ...FONT_MONO }}>{USER.handle}</div>
+            <div className="text-[12px] font-semibold truncate" style={{ color: T.fg }}>{who.name}</div>
+            <div className="text-[10px] truncate" style={{ color: T.fgMute, ...FONT_MONO }}>{who.handle}</div>
           </div>
         </div>
       </div>
     </aside>
   </>
-);
+  );
+};

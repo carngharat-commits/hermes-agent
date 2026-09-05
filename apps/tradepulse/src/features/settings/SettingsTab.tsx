@@ -13,10 +13,11 @@ import { RoadmapCard } from "@/features/settings/RoadmapCard";
 import { SettingRow } from "@/features/settings/SettingRow";
 import { Toggle3 } from "@/features/settings/Toggle3";
 import { ToggleRow } from "@/features/settings/ToggleRow";
-import { USER } from "@/lib/constants";
+import { useAuth } from "@/data/auth";
 import { useThemeMode } from "@/theme/ThemeContext";
 
 export const SettingsTab = () => {
+  const auth = useAuth();
   const { themeMode, setThemeMode, effectiveMode } = useThemeMode();
   const [currency, setCurrency] = useState("INR");
   const [notifSignals, setNotifSignals] = useState(true);
@@ -164,12 +165,12 @@ export const SettingsTab = () => {
       {/* Account */}
       <Card>
         <CardHeader title="Account" icon={Users} />
-        <SettingRow label="Signed in as" sub={USER.handle}>
-          <div className="text-[12.5px] font-semibold" style={{ color: T.fg }}>{USER.name}</div>
+        <SettingRow label="Signed in as" sub={auth.status === "preview" ? "read-only preview" : "passcode session"}>
+          <div className="text-[12.5px] font-semibold" style={{ color: T.fg }}>{auth.user?.name ?? "Investor"}</div>
         </SettingRow>
         <div className="pt-3 mt-3" style={{ borderTop: `1px solid ${T.border}` }}>
           <button
-            onClick={() => alert("Sign out? You'll need to re-authenticate on next visit.")}
+            onClick={() => { if (confirm("Sign out of TradePulse? This also disconnects the broker session.")) auth.logout(); }}
             className="w-full py-2.5 rounded-lg text-[12.5px] font-semibold"
             style={{ background: `${T.down}12`, color: T.down, border: `1px solid ${T.down}30` }}>
             Sign out

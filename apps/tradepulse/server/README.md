@@ -15,6 +15,16 @@ Configuration is entirely environmental — see `../.env.example`. With
 `KITE_API_KEY` and `KITE_API_SECRET` unset the app swaps in `StubKiteClient`
 and serves the identical routes against a fake account.
 
+## The app's own lock
+
+`auth.py`. Every `/api` route except `/healthz`, `/api/auth/login` and
+`/api/auth/session` returns 401 without the `tradepulse_auth` cookie. The Kite
+session sits *behind* that lock: it proves a Zerodha login, not the right to
+use this deployment, and most screens never touch the broker. Details in the
+module docstring; the short version is one shared passcode, constant-time
+compare, lockout after five failures, and a generated passcode printed to the
+log rather than an open door when none is configured.
+
 ## The login flow
 
 Kite Connect's handshake ([docs](https://kite.trade/docs/connect/v3/user/#login-flow)):
@@ -39,6 +49,9 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 | Route | Purpose |
 | --- | --- |
 | `GET /healthz` | Liveness, mode, live session count |
+| `GET /api/auth/session` | Whether this browser is signed in to the app |
+| `POST /api/auth/login` | Sign in with `TRADEPULSE_PASSCODE`; sets the auth cookie |
+| `POST /api/auth/logout` | Sign out, and drop the broker session with it |
 | `GET /api/kite/status` | Whether real credentials are configured |
 | `GET /api/kite/login` | Step 1 — redirect into the Kite login |
 | `GET /api/kite/callback` | Steps 2–4 — verify, exchange, set cookie, bounce back |

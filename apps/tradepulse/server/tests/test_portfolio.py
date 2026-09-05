@@ -10,6 +10,7 @@ from tradepulse_server.config import Settings
 from tradepulse_server.kite import KiteError, StubKiteClient
 
 SETTINGS = Settings(
+    auth_required=False,   # these suites test the routes, not the lock
     frontend_url="http://127.0.0.1:5273/",
     state_secret="test-secret",
     # Each test app gets its own throwaway store; the production default is

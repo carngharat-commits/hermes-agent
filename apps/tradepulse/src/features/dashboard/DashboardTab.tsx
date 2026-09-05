@@ -18,10 +18,11 @@ import { PortfolioHistoryChart } from "@/features/dashboard/PortfolioHistoryChar
 import { QuickAction } from "@/features/dashboard/QuickAction";
 import { SectorRotationView } from "@/features/dashboard/SectorRotationView";
 import { SegmentTile } from "@/features/dashboard/SegmentTile";
-import { USER } from "@/lib/constants";
+import { useAuth } from "@/data/auth";
 import { inrCompact, pct, toINR_us } from "@/lib/format";
 
 export const DashboardTab = ({ holdings, setView }: any) => {
+  const firstName = (useAuth().user?.name ?? "Investor").split(" ")[0];
   // Consolidated totals
   const totals = useMemo(() => {
     const inH = holdings.filter(h => h.segment === "IN");
@@ -58,7 +59,7 @@ export const DashboardTab = ({ holdings, setView }: any) => {
       {/* Header line */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-[22px] font-bold tracking-tight">Good morning, {USER.name.split(" ")[0]}</h1>
+          <h1 className="text-[22px] font-bold tracking-tight">Good morning, {firstName}</h1>
           <div className="text-[12px] mt-1" style={{ color: T.fgMute }}>
             Consolidated view across Zerodha · ABML · INDmoney · Groww · CoinDCX · WazirX · PhonePe
           </div>

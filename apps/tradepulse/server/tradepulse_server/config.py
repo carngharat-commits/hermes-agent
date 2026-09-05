@@ -36,6 +36,14 @@ class Settings:
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
 
+    # The app's own login. Required by default; tests opt out explicitly so
+    # that a forgotten variable can never quietly leave a deployment open.
+    auth_required: bool = True
+    passcode: str = ""
+    auth_cookie_name: str = "tradepulse_auth"
+    # Shown in the sidebar once logged in. A single-user app has one name.
+    user_name: str = "Investor"
+
     host: str = "127.0.0.1"
     port: int = 8787
 
@@ -76,6 +84,10 @@ def load_settings() -> Settings:
         cookie_name=os.environ.get("TRADEPULSE_COOKIE_NAME", "tradepulse_session"),
         cookie_secure=_flag("TRADEPULSE_COOKIE_SECURE", False),
         cookie_samesite=os.environ.get("TRADEPULSE_COOKIE_SAMESITE", "lax"),
+        auth_required=_flag("TRADEPULSE_AUTH_REQUIRED", True),
+        passcode=os.environ.get("TRADEPULSE_PASSCODE", "").strip(),
+        auth_cookie_name=os.environ.get("TRADEPULSE_AUTH_COOKIE_NAME", "tradepulse_auth"),
+        user_name=os.environ.get("TRADEPULSE_USER_NAME", "Investor").strip() or "Investor",
         host=os.environ.get("TRADEPULSE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TRADEPULSE_PORT", "8787")),
         intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db").strip(),

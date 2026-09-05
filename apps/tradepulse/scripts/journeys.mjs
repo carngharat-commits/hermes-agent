@@ -15,6 +15,8 @@
 import { chromium } from "playwright";
 
 const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:5273";
+// The backend under test must be started with this passcode.
+const PASSCODE = process.env.TRADEPULSE_PASSCODE ?? "demo-pass";
 
 const results = [];
 let browser;
@@ -38,6 +40,7 @@ async function main() {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1200);
 
+  await journeyTheDoorIsLocked();
   await journeyFirstRunIsEmptyUntilAsked();
   await journeyAddWatchlistEverySegment();
   await journeyWatchlistValidation();
@@ -135,6 +138,43 @@ async function mainText() {
 }
 
 // ------------------------------------------------------------- journeys
+
+// Only the broker routes used to check a session; every other screen was
+// open to anyone with the URL. Now nothing renders and no /api route answers
+// until the app's own passcode is given.
+async function journeyTheDoorIsLocked() {
+  console.log("\n— the app is locked until you sign in —");
+  // A cold dev server can take seconds to serve the first bundle; wait for
+  // the form rather than a fixed delay, so the first assertion reads a
+  // rendered page and not an empty body.
+  await page.locator("#passcode").waitFor({ timeout: 20000 });
+  const body = await page.locator("body").innerText();
+  check("a visitor sees the sign-in, not the app", /Sign in to continue/.test(body)
+    && !/Portfolio Tracking/.test(body), body.slice(0, 200));
+
+  // The lock is on the server, not just the screen.
+  const status = await page.evaluate(() =>
+    fetch("/api/intel/coverage", { credentials: "same-origin" }).then((r) => r.status));
+  check("the API refuses without a session", status === 401, `HTTP ${status}`);
+
+  await page.locator("#passcode").fill("not-the-passcode");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForTimeout(500);
+  check("a wrong passcode is refused, with a reason",
+    /not right/i.test(await page.locator("body").innerText()));
+
+  await page.locator("#passcode").fill(PASSCODE);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForTimeout(900);
+  const inside = await page.locator("body").innerText();
+  check("the right passcode opens the app", /Dashboard|Portfolio/.test(inside)
+    && !/Sign in to continue/.test(inside), inside.slice(0, 200));
+  check("the sidebar shows who is signed in", /signed in/i.test(inside));
+
+  const after = await page.evaluate(() =>
+    fetch("/api/intel/coverage", { credentials: "same-origin" }).then((r) => r.status));
+  check("the API answers once signed in", after === 200, `HTTP ${after}`);
+}
 
 // The app used to ship a real person's 126-row book as bundled constants, so
 // every visitor saw it. It now starts empty and the demo book is opt-in. This

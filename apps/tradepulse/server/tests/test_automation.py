@@ -204,6 +204,7 @@ def test_a_raising_cycle_backs_off_instead_of_hammering(orchestrator: Orchestrat
 # --- through the API ------------------------------------------------------
 
 SETTINGS = Settings(
+    auth_required=False,   # these suites test the routes, not the lock
     frontend_url="http://127.0.0.1:5273/",
     state_secret="test-secret",
     intel_db_path=":memory:",

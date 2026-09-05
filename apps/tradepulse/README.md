@@ -143,6 +143,27 @@ Reads now go through a 15-second per-session cache (`server/cache.py`) — one
 page load fans out to five Kite endpoints, and Kite publishes per-endpoint
 rate limits.
 
+## Sign-in
+
+Only the broker routes used to check a session; every other screen — the
+book, the watchlist, the AI calls, the performance record — was open to anyone
+who reached the URL. The gap is easy to miss because the broker connection
+*looks* like a login. It is not one: it proves a Zerodha account, not that
+this person may use this deployment.
+
+The backend now refuses every `/api` route without its own session cookie,
+issued by `POST /api/auth/login` against `TRADEPULSE_PASSCODE`. One shared
+passcode is the smallest thing that is actually a lock for a single-user app;
+multi-user arrives with a users table, not with this growing. The compare is
+constant-time, five failures lock a client out for fifteen minutes, and an
+unset passcode never means open — the backend prints a one-time one at start,
+the way Jupyter does. Signing out drops the broker session too, so a shared
+browser cannot inherit a live token for the trading account.
+
+The published prototype has no backend, so it cannot sign anyone in and has
+nothing private behind it. It offers a read-only preview and says so on
+screen the whole time.
+
 ## The book starts empty
 
 The first version shipped a real person's holdings as bundled constants that

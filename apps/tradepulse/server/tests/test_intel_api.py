@@ -9,6 +9,7 @@ from tradepulse_server.app import create_app
 from tradepulse_server.config import Settings
 
 SETTINGS = Settings(
+    auth_required=False,   # these suites test the routes, not the lock
     frontend_url="http://127.0.0.1:5273/",
     state_secret="test-secret",
     # Each test app gets its own throwaway store; the production default is

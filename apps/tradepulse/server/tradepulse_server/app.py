@@ -33,6 +33,7 @@ from .mapping import (
     map_positions,
     summarize,
 )
+from .auth import OPEN_PATHS, AuthStore, passcode_matches, resolve_passcode
 from .sessions import SessionStore, issue_state, verify_state
 
 STATE_PARAM = "tp_state"
@@ -61,6 +62,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="TradePulse Kite backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = store
+    app.state.auth = AuthStore()
+    app.state.passcode = resolve_passcode(settings.passcode, required=settings.auth_required)
     app.state.kite = client
     app.state.cache = TTLCache()
     # The intelligence store outlives the process when a path is set; the
@@ -103,6 +106,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        """Every /api route needs the app's own session, bar the login itself.
+
+        The broker session is not enough: it proves a Zerodha login, not
+        that this person may use this deployment. And most screens never
+        touch the broker at all.
+        """
+        cfg: Settings = app.state.settings
+        path = request.url.path
+        if not cfg.auth_required or path in OPEN_PATHS or not path.startswith("/api/"):
+            return await call_next(request)
+        token = request.cookies.get(cfg.auth_cookie_name)
+        if app.state.auth.get(token) is None:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Sign in to TradePulse first.", "error_type": "LoginRequired"},
+            )
+        return await call_next(request)
+
     def current_settings() -> Settings:
         return app.state.settings
 
@@ -131,6 +154,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "misses": app.state.cache.misses,
             },
         }
+
+    # -- the app's own login ------------------------------------------------
+
+    def _client_address(request: Request) -> str:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    @app.get("/api/auth/session")
+    async def auth_session(
+        request: Request, cfg: Settings = Depends(current_settings),
+    ) -> dict[str, Any]:
+        if not cfg.auth_required:
+            return {"authenticated": True, "required": False,
+                    "user": {"name": cfg.user_name}}
+        session = app.state.auth.get(request.cookies.get(cfg.auth_cookie_name))
+        if session is None:
+            return {"authenticated": False, "required": True}
+        return {"authenticated": True, "required": True,
+                "user": {"name": session.user_name}}
+
+    @app.post("/api/auth/login")
+    async def auth_login(
+        request: Request, payload: dict[str, Any],
+        cfg: Settings = Depends(current_settings),
+    ) -> Any:
+        client = _client_address(request)
+        auth: AuthStore = app.state.auth
+        if auth.locked_out(client):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many attempts. Try again in 15 minutes.",
+                         "error_type": "LockedOut"},
+            )
+        supplied = str(payload.get("passcode") or "")
+        if not passcode_matches(app.state.passcode, supplied):
+            auth.record_failure(client)
+            return JSONResponse(
+                status_code=401,
+                content={"error": "That passcode is not right.", "error_type": "BadPasscode"},
+            )
+        auth.clear_failures(client)
+        token = auth.create(cfg.user_name)
+        response = JSONResponse({"authenticated": True, "required": cfg.auth_required,
+                                 "user": {"name": cfg.user_name}})
+        response.set_cookie(
+            cfg.auth_cookie_name, token, httponly=True, secure=cfg.cookie_secure,
+            samesite=cfg.cookie_samesite, max_age=7 * 24 * 60 * 60, path="/",
+        )
+        return response
+
+    @app.post("/api/auth/logout")
+    async def auth_logout(
+        request: Request,
+        cfg: Settings = Depends(current_settings),
+        store: SessionStore = Depends(current_store),
+        kite: KiteClient = Depends(current_client),
+    ) -> JSONResponse:
+        """Sign out of the app, and drop the broker session with it.
+
+        A signed-out browser must not keep a live bearer token for the
+        trading account behind a cookie the next person could inherit.
+        """
+        app.state.auth.pop(request.cookies.get(cfg.auth_cookie_name))
+        kite_cookie = request.cookies.get(cfg.cookie_name)
+        session = store.pop(kite_cookie)
+        if session is not None:
+            await kite.invalidate(session.access_token)
+            app.state.cache.invalidate_prefix(f"{kite_cookie}:")
+            app.state.prices.revoke()
+        response = JSONResponse({"authenticated": False})
+        response.delete_cookie(cfg.auth_cookie_name, path="/")
+        response.delete_cookie(cfg.cookie_name, path="/")
+        return response
 
     @app.get("/api/kite/status")
     async def status(cfg: Settings = Depends(current_settings)) -> dict[str, Any]:
