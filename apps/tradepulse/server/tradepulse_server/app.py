@@ -36,6 +36,7 @@ from .mapping import (
 )
 from .ai import AIChat, build_client
 from .auth import OPEN_PATHS, AuthStore, passcode_matches, resolve_passcode
+from .persist import SqliteAuthStore, SqliteSessionStore
 from .quotes import QuotePriceSource, QuoteService, build_http_provider
 from .sessions import SessionStore, issue_state, verify_state
 
@@ -44,7 +45,7 @@ STATE_PARAM = "tp_state"
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    store = SessionStore()
+    store = SqliteSessionStore(settings.sessions_db_path)
     client: KiteClient = (
         KiteClient(settings.api_key, settings.api_secret)
         if settings.configured
@@ -65,7 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="TradePulse Kite backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = store
-    app.state.auth = AuthStore()
+    app.state.auth = SqliteAuthStore(settings.sessions_db_path)
     app.state.ai = AIChat(build_client(settings.anthropic_api_key), settings.ai_model)
     app.state.passcode = resolve_passcode(settings.passcode, required=settings.auth_required)
     app.state.kite = client

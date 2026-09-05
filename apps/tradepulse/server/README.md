@@ -170,26 +170,37 @@ entries.
 Holdings and orders don't move fast enough for 15 seconds of staleness to
 matter. Anything that does — live quotes — will want its own path.
 
+## Sessions and secrets (`persist.py`)
+
+Login and broker sessions live in an owner-only SQLite file
+(`TRADEPULSE_SESSIONS_DB`, default `data/sessions.db`), so a restart no longer
+logs everyone out and a second worker on the same host sees the same sessions.
+The OAuth state secret is generated once on first run and kept next to it, so
+a login that straddles a deploy still verifies; set `TRADEPULSE_STATE_SECRET`
+to share it across hosts. The session cookie is `Secure` by default unless
+`TRADEPULSE_FRONTEND_URL` is this machine. The sessions file holds a live
+bearer token for the trading account — keep it out of backups you would not
+treat as a credential.
+
 ## What's still a stub
 
 - **Three agents still abstain.** News, sentiment and macro implement the
   agent contract and return "not wired" with what they'd need. They want a
   feed and a language model, not code.
-- **Unpromoted cycles quote stale marks** (above). A background cycle with no
-  promoted session re-scores against the last recorded price.
-- **Session storage is in-process memory** (`sessions.py`). A restart logs
-  everyone out and a second worker shares nothing with the first. Back
-  `SessionStore` with Redis or a table before this runs anywhere real — the
-  interface is four methods wide, deliberately.
-- **No rate-limit *handling*.** Reads go through a 15s cache (below), which
-  keeps ordinary use well clear of Kite's published per-endpoint limits, but
+- **Fundamentals are hand-built** for eight names. The valuation maths is
+  real; the inputs are not filings. A `FundamentalsProvider` backed by a data
+  vendor extends coverage to any listed script.
+- **Unpromoted cycles quote through the HTTP provider or stale marks.** With
+  neither a promoted session nor `TRADEPULSE_QUOTES_URL`, a background cycle
+  re-scores against the last recorded price.
+- **No rate-limit *handling*.** Reads go through a 15s cache, which keeps
+  ordinary use well clear of Kite's published per-endpoint limits, but
   nothing here backs off or retries on a 429 — it surfaces as a failed sync.
-- **Single-user assumption.** One session cookie, one Kite account, no notion
-  of a TradePulse user owning the broker connection.
-- **Only holdings and orders are live.** Quotes, signals, the calendar and
-  everything else the UI renders still come from the bundled snapshot.
-- **`state_secret` defaults to a per-process random value.** Fine for one dev
-  process, wrong for more than one — set `TRADEPULSE_STATE_SECRET`.
+- **Single-user assumption.** One passcode, one Kite account, no notion of a
+  TradePulse user owning the broker connection. Multi-user comes with a users
+  table.
+- **One host.** SQLite-backed sessions share across workers on a machine, not
+  across machines.
 
 ## Notes
 

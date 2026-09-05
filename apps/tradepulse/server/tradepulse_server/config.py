@@ -7,6 +7,7 @@ repo. See ``.env.example`` at the app root for the full list.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import secrets
 from dataclasses import dataclass, field
 
@@ -68,10 +69,16 @@ class Settings:
     # How often the orchestrator runs a full cycle. 0 disables the scheduler.
     intel_cycle_seconds: int = 900
 
-    # Signs the OAuth state nonce. Generated per process when unset, which is
-    # fine for a single dev instance but means restarts invalidate in-flight
-    # logins — set it explicitly once you run more than one worker.
+    # Signs the OAuth state nonce. `load_settings` resolves an unset value to
+    # a secret persisted under the data directory, so restarts and extra
+    # workers sign and verify the same way; the random default here is for
+    # settings built directly in tests.
     state_secret: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+
+    # Where login and broker sessions live. In memory by default for settings
+    # built directly (tests); `load_settings` points it at a file so a
+    # restart no longer logs everyone out.
+    sessions_db_path: str = ":memory:"
 
     @property
     def configured(self) -> bool:
@@ -83,18 +90,28 @@ class Settings:
         return bool(self.api_key and self.api_secret)
 
 
+def _is_local(url: str) -> bool:
+    host = url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
+    return host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
 def load_settings() -> Settings:
+    from .persist import resolve_state_secret
+
+    frontend_url = os.environ.get("TRADEPULSE_FRONTEND_URL", "http://127.0.0.1:5273/").strip()
+    data_dir = os.environ.get("TRADEPULSE_DATA_DIR", "data").strip() or "data"
     return Settings(
         api_key=os.environ.get("KITE_API_KEY", "").strip(),
         api_secret=os.environ.get("KITE_API_SECRET", "").strip(),
         redirect_url=os.environ.get(
             "KITE_REDIRECT_URL", "http://127.0.0.1:5273/api/kite/callback"
         ).strip(),
-        frontend_url=os.environ.get(
-            "TRADEPULSE_FRONTEND_URL", "http://127.0.0.1:5273/"
-        ).strip(),
+        frontend_url=frontend_url,
         cookie_name=os.environ.get("TRADEPULSE_COOKIE_NAME", "tradepulse_session"),
-        cookie_secure=_flag("TRADEPULSE_COOKIE_SECURE", False),
+        # Secure unless the UI is served from this machine. An explicit
+        # variable still wins, but the default no longer leaves a public
+        # deployment sending its session cookie over plain HTTP.
+        cookie_secure=_flag("TRADEPULSE_COOKIE_SECURE", not _is_local(frontend_url)),
         cookie_samesite=os.environ.get("TRADEPULSE_COOKIE_SAMESITE", "lax"),
         auth_required=_flag("TRADEPULSE_AUTH_REQUIRED", True),
         passcode=os.environ.get("TRADEPULSE_PASSCODE", "").strip(),
@@ -110,6 +127,10 @@ def load_settings() -> Settings:
         port=int(os.environ.get("TRADEPULSE_PORT", "8787")),
         intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db").strip(),
         intel_cycle_seconds=int(os.environ.get("TRADEPULSE_CYCLE_SECONDS", "900")),
-        state_secret=os.environ.get("TRADEPULSE_STATE_SECRET", "")
-        or secrets.token_urlsafe(32),
+        state_secret=resolve_state_secret(
+            os.environ.get("TRADEPULSE_STATE_SECRET", "").strip(), data_dir
+        ),
+        sessions_db_path=os.environ.get(
+            "TRADEPULSE_SESSIONS_DB", str(Path(data_dir) / "sessions.db")
+        ).strip(),
     )

@@ -193,6 +193,15 @@ fabricated number. A **live** quote (kite, http) moves the row's price and
 day change and does feed the valuation. The scheduler's unattended cycles use
 the same HTTP source before falling back to stale marks.
 
+## Sessions survive a restart
+
+Login and broker sessions used to live in process memory: a restart logged
+everyone out, and the secret that signs the broker login was minted per
+process, so a deploy mid-login broke the login. Both now persist in an
+owner-only SQLite file under `server/data/`, the secret is generated once and
+kept beside it, and the session cookie is `Secure` by default anywhere the UI
+is not served from this machine. Details in `server/README.md`.
+
 ## The book starts empty
 
 The first version shipped a real person's holdings as bundled constants that
