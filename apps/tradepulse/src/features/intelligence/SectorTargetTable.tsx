@@ -2,10 +2,11 @@
    Only the module header and the `export` keyword are new. */
 
 import { FONT_MONO, T } from "@/theme/tokens";
-import { IN_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { SECTOR } from "@/data/taxonomy";
 
 export const SectorTargetTable = () => {
+  const { IN_STOCKS } = useBook();
   // Compute user's current sector weights from IN holdings
   const inH = IN_STOCKS;
   const sectorMap: Record<string, number> = {};

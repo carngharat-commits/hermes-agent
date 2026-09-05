@@ -4,7 +4,7 @@
 import { useState, useMemo } from "react";
 import { RefreshCw } from "lucide-react";
 
-import { CRYPTO, DIGITAL_METALS, IN_STOCKS, MUTUAL_FUNDS, US_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { MODEL_PORTFOLIOS } from "@/data/risk";
@@ -13,6 +13,7 @@ import { inrCompact, toINR_us } from "@/lib/format";
 
 /* ------ Rebalance Sub-View -------------------------------------------- */
 export const RebalanceView = () => {
+  const { CRYPTO, DIGITAL_METALS, IN_STOCKS, MUTUAL_FUNDS, US_STOCKS } = useBook();
   const [modelK, setModelK] = useState("balanced");
   const model = MODEL_PORTFOLIOS.find(m => m.k === modelK);
 

@@ -25,6 +25,36 @@ const COPY: Record<HoldingsSource, { tone: string; label: string; note: string }
       "No broker is connected, so every holding is the snapshot bundled with " +
       "the app. Connect Zerodha under Accounts to sync that slice live.",
   },
+  empty: {
+    tone: "neutral",
+    label: "Empty",
+    note:
+      "Nothing is in the book yet. Add a position, connect Zerodha under " +
+      "Accounts, or load the demo book to see every screen with sample data.",
+  },
+  demo: {
+    tone: "warn",
+    label: "Demo book",
+    note:
+      "These are sample holdings, not anyone's real positions. They exist so " +
+      "every screen has something to show. Clear them under Portfolio when " +
+      "you start entering your own.",
+  },
+  manual: {
+    tone: "info",
+    label: "Entered by you",
+    note:
+      "Every holding here was typed in on this device. It is stored in this " +
+      "browser only. Connect Zerodha under Accounts to sync that slice live.",
+  },
+  mixed: {
+    tone: "warn",
+    label: "Demo + yours",
+    note:
+      "The demo book is loaded alongside holdings you entered. Totals mix " +
+      "sample rows with real ones — clear the demo under Portfolio to keep " +
+      "only yours.",
+  },
 };
 
 /** Says where the numbers on screen came from. Tap for the full caveat. */

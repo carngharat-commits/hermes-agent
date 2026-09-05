@@ -7,13 +7,14 @@ import { Calendar } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { MF_EXIT_DATA } from "@/data/risk";
-import { MUTUAL_FUNDS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { Pill } from "@/components/ui/Pill";
 import { Row } from "@/components/ui/Row";
 import { inrCompact } from "@/lib/format";
 
 /* ------ MF Dates + Exit Load Sub-View --------------------------------- */
 export const MFDatesView = () => {
+  const { MUTUAL_FUNDS } = useBook();
   const [dates, setDates] = useState(() => {
     const init = {};
     MF_EXIT_DATA.forEach(m => { init[m.name] = m.defaultPurchase; });

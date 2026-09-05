@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { AlertTriangle, Globe, ShieldAlert } from "lucide-react";
 
 import { BetaDial } from "@/features/risk/BetaDial";
-import { CRYPTO, IN_STOCKS, MUTUAL_FUNDS, US_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { KV } from "@/components/ui/KV";
 import { SECTOR } from "@/data/taxonomy";
@@ -17,6 +17,7 @@ import { inrCompact, toINR_us } from "@/lib/format";
 
 /* ------ Beta & Stress Sub-View --------------------------------------- */
 export const BetaStressView = () => {
+  const { CRYPTO, IN_STOCKS, MUTUAL_FUNDS, US_STOCKS } = useBook();
   const inH = IN_STOCKS;
   const totals = useMemo(() => {
     const inCV = inH.reduce((s, h) => s + h.qty * h.ltp, 0);

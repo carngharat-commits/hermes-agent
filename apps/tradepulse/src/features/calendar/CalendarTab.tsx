@@ -7,12 +7,13 @@ import { Calendar } from "lucide-react";
 import { CALENDAR } from "@/data/trading";
 import { Card } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { IN_STOCKS, US_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { KV } from "@/components/ui/KV";
 import { Pill } from "@/components/ui/Pill";
 import { Row } from "@/components/ui/Row";
 
 export const CalendarTab = () => {
+  const { IN_STOCKS, US_STOCKS } = useBook();
   const [filter, setFilter] = useState("all"); // all | earnings | macro | geopol | holiday
   const [horizon, setHorizon] = useState(30); // 7 | 30 | 60 days
   const holdingSyms = useMemo(() => new Set([

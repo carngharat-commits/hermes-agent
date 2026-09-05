@@ -38,6 +38,7 @@ async function main() {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1200);
 
+  await journeyFirstRunIsEmptyUntilAsked();
   await journeyAddWatchlistEverySegment();
   await journeyWatchlistValidation();
   await journeyAddHoldingEverySegment();
@@ -134,6 +135,29 @@ async function mainText() {
 }
 
 // ------------------------------------------------------------- journeys
+
+// The app used to ship a real person's 126-row book as bundled constants, so
+// every visitor saw it. It now starts empty and the demo book is opt-in. This
+// runs first because every later journey assumes the demo book is loaded.
+async function journeyFirstRunIsEmptyUntilAsked() {
+  console.log("\n— first run starts empty; the demo book is opt-in —");
+  await openTab("Portfolio");
+  const fresh = await mainText();
+  check("a fresh visitor sees an empty book", /Your book is empty/i.test(fresh),
+    fresh.slice(0, 200));
+  check("no holdings are pre-filled", /\b0 holdings\b/.test(fresh), fresh.slice(0, 200));
+  check("the source badge says so", /\bEmpty\b/i.test(fresh));  // pill is CSS-uppercased
+  check("no personal name is shown anywhere", !/Rahul|Gharat|Thane/.test(
+    await page.locator("body").innerText()));
+
+  await page.getByRole("button", { name: /Load demo book/ }).click();
+  await page.waitForTimeout(600);
+  const loaded = await mainText();
+  check("loading the demo book fills the portfolio", !/Your book is empty/i.test(loaded)
+    && /\d{2,} holdings/.test(loaded), loaded.slice(0, 200));
+  check("the demo book is labelled as a demo", /Demo book/i.test(loaded));
+  check("the demo can be cleared", await page.getByRole("button", { name: /Clear demo/ }).count() === 1);
+}
 
 /** Dummy rows, one per segment, shaped like something a person would type. */
 const WATCHLIST_ROWS = [

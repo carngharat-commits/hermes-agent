@@ -6,12 +6,13 @@ import { Check, Percent } from "lucide-react";
 
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { IN_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { KV } from "@/components/ui/KV";
 import { inrCompact, pct } from "@/lib/format";
 
 /* ------ Tax Harvest Sub-View ------------------------------------------ */
 export const TaxHarvestView = () => {
+  const { IN_STOCKS } = useBook();
   const [selected, setSelected] = useState({});
   const losers = useMemo(() => {
     // Compute loss for each holding with avg present

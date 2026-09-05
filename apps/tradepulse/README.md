@@ -143,6 +143,23 @@ Reads now go through a 15-second per-session cache (`server/cache.py`) — one
 page load fans out to five Kite endpoints, and Kite publishes per-endpoint
 rate limits.
 
+## The book starts empty
+
+The first version shipped a real person's holdings as bundled constants that
+eight views imported directly. Fine for a personal dashboard; a blocker for
+anything public, since every visitor saw that book.
+
+Holdings now live in `src/data/book.ts`: an external store that starts empty,
+persists in this browser's localStorage only, and is what every view reads.
+A first-time visitor sees "Your book is empty" with three ways in — add a
+position, connect Zerodha, or load the demo book. The demo (`demoBook.ts`) is
+sample data, labelled as such on the source badge, and can be cleared with one
+click. Rows a user types in land in the same store, so the risk, calendar and
+intelligence views see them exactly as they see a demo or a broker sync.
+
+No name, location or filing status is baked in anywhere; the sidebar shows a
+placeholder until a login exists.
+
 ## Where the AI shows up
 
 Every AI call in the UI can be opened. The pill on a holding or watchlist row

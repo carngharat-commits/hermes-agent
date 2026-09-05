@@ -23,7 +23,7 @@ export type KiteSession =
   | { authenticated: false; mode: KiteMode }
   | { authenticated: true; mode: KiteMode; profile: KiteProfile };
 
-/** A holding in the shape `src/data/holdings.ts` uses. */
+/** A holding in the shape `src/data/demoBook.ts` rows use. */
 export type KiteHolding = {
   sym: string;
   qty: number;

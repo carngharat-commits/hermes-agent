@@ -7,10 +7,11 @@ import { Card } from "@/components/ui/Card";
 import { DemoBadge } from "@/components/ui/DemoBadge";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { INVESTOR_MOVES } from "@/data/intelligence";
-import { IN_STOCKS, US_STOCKS } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { InvestorMoveCard } from "@/features/intelligence/InvestorMoveCard";
 
 export const BigMovesView = () => {
+  const { IN_STOCKS, US_STOCKS } = useBook();
   const [filter, setFilter] = useState("mine"); // mine | all
   const [tier, setTier] = useState("all"); // all | HNI | MF | FII | PMS
 

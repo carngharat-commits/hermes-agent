@@ -3,4 +3,6 @@
 
 export const USD_INR = 85;
 
-export const USER = { name: "Rahul Gharat", handle: "HUF · Thane", initials: "RG" };
+// A placeholder identity. Step 2 replaces this with whoever logged in; until
+// then the app must not present itself as any particular person's.
+export const USER = { name: "Investor", handle: "not signed in", initials: "TP" };

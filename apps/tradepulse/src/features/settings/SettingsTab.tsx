@@ -179,7 +179,7 @@ export const SettingsTab = () => {
 
       {/* About */}
       <div className="text-center text-[10.5px] pt-4" style={{ color: T.fgDim, ...FONT_MONO }}>
-        TradePulse v0.9 (build 20260731) · Made in Thane, IN
+        TradePulse v0.9 (build 20260731)
       </div>
     </div>
   );

@@ -99,6 +99,12 @@ nothing populates the context it reads — both new agents shipped in exactly
 that state), what the ensemble *recommended* as a distribution, and whether
 any weight moved off its default.
 
+`seed_demo.py` records sixty days of marks for four demo holdings and asks the
+running backend for a call on each, so a fresh install has an AI call the UI
+can open and explain. The two banks share a shock so the cross-market agent has
+something to find, and one deliberately cheap call exercises the "held back by
+portfolio exposure" branch.
+
 `prices.py` gives the scheduler a price source. A Kite session belongs to a
 browser, not a process, so a session must be explicitly **promoted** before
 background cycles quote with it — deliberate and revocable, since the token is

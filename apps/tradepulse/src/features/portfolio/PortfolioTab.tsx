@@ -1,7 +1,7 @@
 /* Lifted verbatim from the original single-file TradePulse artifact.
    Only the module header and the `export` keyword are new. */
 
-import { Bitcoin, Building2, Camera, ChevronRight, Eye, Landmark, PieChart as PieChartIcon, Plus, Sparkles } from "lucide-react";
+import { Bitcoin, Building2, Camera, ChevronRight, Eye, FlaskConical, Landmark, Link2, PieChart as PieChartIcon, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Btn } from "@/components/ui/Btn";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -10,7 +10,10 @@ import { KV } from "@/components/ui/KV";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 import { cvINR, inrCompact, ivINR, pct, toINR_us } from "@/lib/format";
 
-export const PortfolioTab = ({ holdings, watchlist, onOpenSegment, onOpenWatchlist, onAdd, source = "snapshot" }: any) => {
+export const PortfolioTab = ({
+  holdings, watchlist, onOpenSegment, onOpenWatchlist, onAdd, source = "snapshot",
+  onLoadDemo, onClearDemo, onConnect,
+}: any) => {
   const segs = ["IN", "US", "MF", "PM", "CR"].map(k => {
     const list = holdings.filter(h => h.segment === k);
     const cv = list.reduce((s, h) => s + cvINR(h), 0);
@@ -46,8 +49,37 @@ export const PortfolioTab = ({ holdings, watchlist, onOpenSegment, onOpenWatchli
             {holdings.length} holdings across 6 accounts · {inrCompact(total)} net worth
           </div>
         </div>
-        <Btn onClick={onAdd}><Plus size={14} /> Add Position</Btn>
+        <div className="flex items-center gap-2">
+          {(source === "demo" || source === "mixed") && onClearDemo && (
+            <Btn variant="ghost" size="sm" onClick={onClearDemo} title="Remove the sample holdings">
+              <Trash2 size={12} /> Clear demo
+            </Btn>
+          )}
+          <Btn onClick={onAdd}><Plus size={14} /> Add Position</Btn>
+        </div>
       </div>
+
+      {/* First run. The book starts empty on purpose: this app must never
+          present someone else's holdings as yours. Three ways in. */}
+      {holdings.length === 0 && (
+        <Card>
+          <div className="flex flex-col items-center text-center py-6">
+            <div className="text-[15px] font-semibold">Your book is empty</div>
+            <div className="text-[11.5px] mt-1 max-w-[360px]" style={{ color: T.fgMute }}>
+              Nothing here is pre-filled. Add a position you own, connect your broker,
+              or load a sample book to see every screen with data on it.
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+              <Btn onClick={onAdd}><Plus size={13} /> Add a position</Btn>
+              {onConnect && <Btn variant="ghost" onClick={onConnect}><Link2 size={13} /> Connect Zerodha</Btn>}
+              {onLoadDemo && <Btn variant="ghost" onClick={onLoadDemo}><FlaskConical size={13} /> Load demo book</Btn>}
+            </div>
+            <div className="text-[10px] mt-3" style={{ color: T.fgDim }}>
+              The demo book is clearly labelled and can be cleared at any time.
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Portfolio summary */}
       <Card>

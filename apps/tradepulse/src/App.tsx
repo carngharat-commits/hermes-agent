@@ -14,6 +14,7 @@ import { IntelligenceTab } from "@/features/intelligence/IntelligenceTab";
 import { OpportunitiesTab } from "@/features/opportunities/OpportunitiesTab";
 import { OrdersTab } from "@/features/orders/OrdersTab";
 import { PortfolioTab } from "@/features/portfolio/PortfolioTab";
+import { clearBook, loadDemoBook } from "@/data/book";
 import { PerformanceTab } from "@/features/performance/PerformanceTab";
 import { RiskAuditTab } from "@/features/risk/RiskAuditTab";
 import { SegmentDrill } from "@/features/portfolio/SegmentDrill";
@@ -53,9 +54,9 @@ export default function TradePulse() {
     return () => mq.removeEventListener?.("change", listener);
   }, [themeMode]);
 
-  // Holdings come from the bundled snapshot until a Kite session exists, at
-  // which point the Zerodha slice is replaced by the live book. See
-  // data/usePortfolio.ts.
+  // Holdings come from the user's book (empty on first run; demo or manual
+  // rows after that) until a Kite session exists, at which point the Zerodha
+  // slice is replaced by the live book. See data/usePortfolio.ts.
   const { holdings, source: holdingsSource, addHolding } = usePortfolio();
   const [watchlist, setWatchlist] = useState([]);
 
@@ -93,7 +94,10 @@ export default function TradePulse() {
     return <PortfolioTab holdings={holdings} watchlist={watchlist} source={holdingsSource}
       onOpenSegment={k => setSegmentDrill(k)}
       onOpenWatchlist={() => setWatchOpen(true)}
-      onAdd={() => openAdd("holding")} />;
+      onAdd={() => openAdd("holding")}
+      onLoadDemo={loadDemoBook}
+      onClearDemo={clearBook}
+      onConnect={() => setView("accounts")} />;
   };
 
   return (

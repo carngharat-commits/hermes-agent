@@ -3,7 +3,7 @@
 
 import { AlertTriangle, Bitcoin } from "lucide-react";
 
-import { CRYPTO } from "@/data/holdings";
+import { useBook } from "@/data/book";
 import { CRYPTO_PLAN } from "@/data/risk";
 import { Card } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
@@ -13,6 +13,7 @@ import { inrCompact } from "@/lib/format";
 
 /* ------ Crypto Plan Sub-View ------------------------------------------ */
 export const CryptoPlanView = () => {
+  const { CRYPTO } = useBook();
   const totalCurrent = CRYPTO.reduce((s, c) => s + c.current, 0);
   const totalInvested = CRYPTO.reduce((s, c) => s + c.invested, 0);
   return (

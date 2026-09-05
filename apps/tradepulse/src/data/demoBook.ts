@@ -1,7 +1,9 @@
-/* Lifted verbatim from the original single-file TradePulse artifact.
-   Only the module header and the `export` keyword are new. */
-
-/* ----------------- REAL HOLDINGS (parsed from Rahul's uploads) ----------- */
+/* The demo book.
+   A sample portfolio a first-time visitor can load to see every screen with
+   something on it. Nothing here is anyone's real position: the app starts
+   empty (see `book.ts`) and this is loaded only when the user asks for it.
+   Row shapes are lifted from the original single-file TradePulse artifact so
+   every existing view renders them unchanged. */
 export const IN_ZERODHA = [
   { sym:"AEQUS", qty:1, avg:159.17, ltp:229.12, dayPct:0.37 },
   { sym:"AEROENTER", qty:100, avg:103.55, ltp:122.14, dayPct:0.93 },

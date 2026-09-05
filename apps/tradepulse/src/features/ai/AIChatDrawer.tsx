@@ -21,7 +21,7 @@ export const AIChatDrawer = ({ context, onClose }: any) => {
     ? `${d.sym} · ${d.action} · ${d.timeframe}`
     : `${d.sym} · ${d.category} · Confidence ${d.confidence}`;
 
-  const SYSTEM_PROMPT = `You are an embedded market analyst inside TradePulse, a portfolio decision-support app for Rahul Gharat, an HUF investor in Thane, Mumbai. Rahul holds a real, diversified book across Zerodha, ABML, INDmoney, Groww, CoinDCX, WazirX, and PhonePe.
+  const SYSTEM_PROMPT = `You are an embedded market analyst inside TradePulse, a portfolio decision-support app for an Indian retail investor. The user may hold a diversified book across Indian equities, US equities, mutual funds, crypto and digital metals through several brokers.
 
 Your job on this screen:
 - Explain the reasoning behind a specific trading signal or opportunity in plain terms
