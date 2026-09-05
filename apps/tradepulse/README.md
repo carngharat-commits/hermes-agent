@@ -175,6 +175,24 @@ sends only the context block and the conversation. With no key configured the
 drawer says so in words rather than failing, and nothing else on the screen
 depends on it.
 
+## Quotes without a broker
+
+The one live price source was a Kite session, which belongs to a browser and
+a Zerodha account, so a user who only wanted to watch scripts never saw a
+price move. `GET /api/quotes?symbols=…` now answers from the best source it
+has, in this order: a promoted Kite session, then any JSON quote endpoint
+configured with `TRADEPULSE_QUOTES_URL` (a URL template plus a dotted path to
+the price — any vendor works, no broker needed), then deterministic stub
+quotes. The response says which, and so does the UI.
+
+One rule governs how a quote is used: a **stub** quote may fill a price nobody
+supplied — a watchlist row saved with just a target shows "Now ₹…" with a
+*stub quote* pill — but never overwrites a price somebody did, and never
+feeds a valuation, because a discount computed against a pretend price is a
+fabricated number. A **live** quote (kite, http) moves the row's price and
+day change and does feed the valuation. The scheduler's unattended cycles use
+the same HTTP source before falling back to stale marks.
+
 ## The book starts empty
 
 The first version shipped a real person's holdings as bundled constants that

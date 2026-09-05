@@ -8,10 +8,19 @@ import { Card } from "@/components/ui/Card";
 import { FONT_BODY, FONT_MONO, T } from "@/theme/tokens";
 import { HoldingRow } from "@/features/portfolio/HoldingRow";
 import { useIntel } from "@/data/useIntel";
+import { useQuotes, withQuote } from "@/data/useQuotes";
 import { SortMenu } from "@/features/portfolio/SortMenu";
 import { cvOf, inrCompact, ivOf, pct } from "@/lib/format";
 
-export const SegmentDrill = ({ segment, holdings, onBack }: any) => {
+export const SegmentDrill = ({ segment, holdings: rawHoldings, onBack }: any) => {
+  // Quotes for the rows on screen. A live source moves ltp and the day
+  // change; a stub only fills a price that is missing.
+  const segmentRows = useMemo(() => rawHoldings.filter((h: any) => h.segment === segment), [rawHoldings, segment]);
+  const quotes = useQuotes(segmentRows.map((h: any) => h.sym));
+  const holdings = useMemo(
+    () => rawHoldings.map((h: any) => h.segment === segment ? withQuote(h, quotes.bySymbol[String(h.sym).toUpperCase()]) : h),
+    [rawHoldings, segment, quotes.bySymbol],
+  );
   // Intrinsic value for the rows on screen, in one batched request.
   const { bySymbol } = useIntel(holdings.filter((h: any) => h.segment === segment));
   const meta = {

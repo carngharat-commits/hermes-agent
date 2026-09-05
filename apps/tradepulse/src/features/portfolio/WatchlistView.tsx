@@ -10,6 +10,7 @@ import { Pill } from "@/components/ui/Pill";
 import { Row } from "@/components/ui/Row";
 import { ValuationStrip } from "@/components/ui/ValuationStrip";
 import { useIntel } from "@/data/useIntel";
+import { useQuotes } from "@/data/useQuotes";
 
 export const WatchlistView = ({ watchlist, onAdd, onRemove, onBack }: any) => {
   // Only rows carrying a price the user actually observed get valued.
@@ -19,8 +20,17 @@ export const WatchlistView = ({ watchlist, onAdd, onRemove, onBack }: any) => {
   // that would compare intrinsic value to what the user *hopes* to pay and
   // present the gap as a discount to market, which is a fabricated number.
   // `ltpEntered` is the flag that separates the two.
-  const hasMarketPrice = (w: any) => Number(w.ltp) > 0 && w.ltpEntered !== false;
-  const { bySymbol } = useIntel(watchlist.filter(hasMarketPrice));
+  const typedPrice = (w: any) => Number(w.ltp) > 0 && w.ltpEntered !== false;
+
+  // Quotes for every row. A live quote (kite, http) is a market price and
+  // feeds the valuation; a stub quote is shown, labelled, and feeds nothing
+  // — a discount computed against a pretend price is a fabricated number.
+  const quotes = useQuotes(watchlist.map((w: any) => w.sym));
+  const quoteFor = (w: any) => quotes.bySymbol[String(w.sym).toUpperCase()];
+  const liveQuote = (w: any) => { const q = quoteFor(w); return q && q.source !== "stub" ? q : undefined; };
+  const priced = (w: any) => liveQuote(w) ? { ...w, ltp: liveQuote(w)!.price } : typedPrice(w) ? w : null;
+  const hasMarketPrice = (w: any) => priced(w) !== null;
+  const { bySymbol } = useIntel(watchlist.map(priced).filter(Boolean));
 
   return (
     <div className="space-y-4">
@@ -79,7 +89,14 @@ export const WatchlistView = ({ watchlist, onAdd, onRemove, onBack }: any) => {
                       {/* Quantity is optional on a watchlist — you don't own it. */}
                       {w.qty > 0 && <>Qty {w.qty} · </>}
                       Target {w.segment === "US" ? "$" : "₹"}{w.target}
-                      {w.ltp > 0 && <> · Now {w.segment === "US" ? "$" : "₹"}{w.ltp}</>}
+                      {(() => {
+                        const q = quoteFor(w);
+                        const cur = w.segment === "US" ? "$" : "₹";
+                        if (q && q.source !== "stub") return <> · Now {cur}{q.price}{q.day_pct != null && <span style={{ color: q.day_pct >= 0 ? T.up : T.down }}> ({q.day_pct >= 0 ? "+" : ""}{q.day_pct}%)</span>}</>;
+                        if (typedPrice(w)) return <> · Now {cur}{w.ltp}</>;
+                        if (q) return <> · Now {cur}{q.price} <Pill tone="warn" size="xs">stub quote</Pill></>;
+                        return null;
+                      })()}
                     </div>
 
                     <ValuationStrip row={intel} />

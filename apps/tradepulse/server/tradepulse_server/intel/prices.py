@@ -100,9 +100,12 @@ class PriceFeed:
     token that will expire at ~6am IST.
     """
 
-    def __init__(self, store, client: KiteClient):
+    def __init__(self, store, client: KiteClient, fallback: PriceSource | None = None):
         self.store = store
         self.client = client
+        # A broker-free source (the configured HTTP quote provider) that sits
+        # between a promoted Kite session and stale stored marks.
+        self.fallback = fallback
         self._promoted_token: str | None = None
         self._promoted_user: str = ""
 
@@ -123,12 +126,14 @@ class PriceFeed:
     def source(self) -> PriceSource:
         if self._promoted_token:
             return KitePriceSource(self.client, self._promoted_token)
+        if self.fallback is not None:
+            return self.fallback
         return StoredPriceSource(self.store)
 
     async def quote(self, symbols: list[str]) -> dict[str, float]:
         source = self.source()
         prices = await source.quote(symbols)
-        if not prices and source.name == "kite":
+        if not prices and source.name != "stored":
             # A promoted token that stops answering (expired overnight, most
             # likely) should degrade to stored marks, not to nothing.
             logger.warning("live quotes returned nothing; falling back to stored marks")

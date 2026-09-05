@@ -36,6 +36,7 @@ from .mapping import (
 )
 from .ai import AIChat, build_client
 from .auth import OPEN_PATHS, AuthStore, passcode_matches, resolve_passcode
+from .quotes import QuotePriceSource, QuoteService, build_http_provider
 from .sessions import SessionStore, issue_state, verify_state
 
 STATE_PARAM = "tp_state"
@@ -73,7 +74,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # default in-memory database keeps tests and demos self-contained.
     app.state.intel = IntelService(store=IntelStore(settings.intel_db_path))
     app.state.orchestrator = Orchestrator(app.state.intel)
-    app.state.prices = PriceFeed(app.state.intel.store, client)
+    http_quotes = build_http_provider(
+        settings.quotes_url, settings.quotes_price_path,
+        settings.quotes_change_path, settings.quotes_auth_header,
+    )
+    app.state.prices = PriceFeed(
+        app.state.intel.store, client,
+        fallback=QuotePriceSource(http_quotes) if http_quotes else None,
+    )
+    app.state.quotes = QuoteService(app.state.prices, http_quotes, app.state.intel.store)
 
     async def refresh_cycle_inputs() -> dict[str, float]:
         """Quote the covered book so the next cycle has something current."""
@@ -232,6 +241,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(cfg.auth_cookie_name, path="/")
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
+
+    # -- quotes, with or without a broker ------------------------------------
+
+    @app.get("/api/quotes/status")
+    async def quotes_status() -> dict[str, Any]:
+        return app.state.quotes.status()
+
+    @app.get("/api/quotes")
+    async def quotes(symbols: str = Query(default="")) -> dict[str, Any]:
+        """Latest price per symbol, and where it came from."""
+        wanted = [s for s in symbols.split(",") if s.strip()][:200]
+        return await app.state.quotes.quotes(wanted)
 
     # -- AI chat, server-side ---------------------------------------------
 

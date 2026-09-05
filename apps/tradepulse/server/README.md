@@ -52,6 +52,8 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 | `GET /api/auth/session` | Whether this browser is signed in to the app |
 | `POST /api/auth/login` | Sign in with `TRADEPULSE_PASSCODE`; sets the auth cookie |
 | `POST /api/auth/logout` | Sign out, and drop the broker session with it |
+| `GET /api/quotes?symbols=A,B` | Latest price per symbol and its source (kite / http / stub) |
+| `GET /api/quotes/status` | Which quote source is in use |
 | `GET /api/ai/status` | Whether a model is configured for the chat drawer |
 | `POST /api/ai/chat` | One reply for the drawer; key and prompt stay server-side |
 | `GET /api/kite/status` | Whether real credentials are configured |
@@ -119,6 +121,11 @@ running backend for a call on each, so a fresh install has an AI call the UI
 can open and explain. The two banks share a shock so the cross-market agent has
 something to find, and one deliberately cheap call exercises the "held back by
 portfolio exposure" branch.
+
+`quotes.py` is the user-facing quote path: Kite when promoted, else the HTTP
+provider from `TRADEPULSE_QUOTES_URL`, else labelled stub quotes; fifteen
+seconds of cache per symbol. `PriceFeed` takes the same HTTP provider as a
+fallback, so unattended cycles quote without a broker too.
 
 `prices.py` gives the scheduler a price source. A Kite session belongs to a
 browser, not a process, so a session must be explicitly **promoted** before

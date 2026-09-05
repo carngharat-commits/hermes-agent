@@ -53,6 +53,7 @@ async function main() {
   await journeyEveryAICallIsExplainable();
   await journeyWatchlistShowsIntelligenceOnlyWhenPriced();
   await journeyAIChatNeverLeavesTheServer();
+  await journeyQuotesFillBlanksButNeverOverwrite();
 
   check("no uncaught page errors during any journey", crashes.length === 0,
     crashes.join("\n         "));
@@ -531,6 +532,41 @@ async function journeyAIChatNeverLeavesTheServer() {
   check("no request left the page for api.anthropic.com", leaks.length === 0, leaks.join(", "));
   page.off("request", onRequest);
   await closeSheet();
+}
+
+// Quotes without a broker. With nothing configured the backend serves stub
+// quotes, and the UI follows one rule: a stub may fill a price nobody
+// supplied, never overwrite one somebody did, and never feeds a valuation.
+async function journeyQuotesFillBlanksButNeverOverwrite() {
+  console.log("\n— quotes fill blanks but never overwrite or value —");
+  const status = await page.evaluate(() =>
+    fetch("/api/quotes/status", { credentials: "same-origin" }).then((r) => r.json()));
+  check("the backend reports its quote source honestly", status.source === "stub" && status.live === false,
+    JSON.stringify(status));
+
+  // A target-only watchlist row: the stub fills "Now", labelled, and still no MOS.
+  await openAddSheet("watchlist");
+  await pickSegment("IN");
+  await (await nameField("IN")).fill("BHEL");
+  await page.getByPlaceholder("0.00").nth(0).fill("300");
+  await (await saveButton()).click();
+  await page.waitForTimeout(1800);
+  const list = await mainText();
+  // Just this row: from its symbol to the next "SYMBOL / segment" header.
+  // A fixed-width slice ran into the priced TITAN row beneath it.
+  const block = (/BHEL\nIN\n[\s\S]*?(?=\n[A-Z][A-Z0-9 .]+\n(?:IN|US|MF|PM|CR)\n|$)/.exec(list) || [""])[0];
+  check("a stub quote fills the missing price, and says it is a stub",
+    /Now ₹[\d.]+/.test(block) && /stub quote/i.test(block), block);
+  check("a stub quote never feeds a valuation", !/MOS|% over/i.test(block), block);
+
+  // A demo holding with its own price: the stub must not move it.
+  await openTab("Portfolio");
+  await page.getByText("Indian Equities").first().click();
+  await page.waitForTimeout(1500);
+  const drill = await mainText();
+  const axis = drill.slice(drill.indexOf("AXISBANK"), drill.indexOf("AXISBANK") + 160);
+  check("a stub quote never overwrites a price the book already has",
+    /1,?235\.40/.test(axis), axis);
 }
 
 function report() {

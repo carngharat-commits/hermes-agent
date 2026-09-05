@@ -49,6 +49,13 @@ class Settings:
     anthropic_api_key: str = ""
     ai_model: str = "claude-opus-5"
 
+    # Quotes without a broker: any JSON endpoint with a URL template and a
+    # dotted path to the price. Unset means stub quotes, labelled as such.
+    quotes_url: str = ""
+    quotes_price_path: str = "price"
+    quotes_change_path: str = ""
+    quotes_auth_header: str = ""
+
     host: str = "127.0.0.1"
     port: int = 8787
 
@@ -95,6 +102,10 @@ def load_settings() -> Settings:
         user_name=os.environ.get("TRADEPULSE_USER_NAME", "Investor").strip() or "Investor",
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip(),
         ai_model=os.environ.get("TRADEPULSE_AI_MODEL", "claude-opus-5").strip() or "claude-opus-5",
+        quotes_url=os.environ.get("TRADEPULSE_QUOTES_URL", "").strip(),
+        quotes_price_path=os.environ.get("TRADEPULSE_QUOTES_PRICE_PATH", "price").strip() or "price",
+        quotes_change_path=os.environ.get("TRADEPULSE_QUOTES_CHANGE_PATH", "").strip(),
+        quotes_auth_header=os.environ.get("TRADEPULSE_QUOTES_AUTH_HEADER", "").strip(),
         host=os.environ.get("TRADEPULSE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TRADEPULSE_PORT", "8787")),
         intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db").strip(),
