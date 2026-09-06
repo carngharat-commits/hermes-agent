@@ -1,6 +1,6 @@
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 import { useServerSync } from "@/data/useServerSync";
 
 /** Shows the login until the backend says this browser is in. */

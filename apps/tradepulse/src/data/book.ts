@@ -57,19 +57,49 @@ export function flattenBook(book: Book): any[] {
   ];
 }
 
+const tagDemo = (rows: any[]) => rows.map((r) => ({ ...r, demo: true }));
+const ownRows = (rows: any[]) => rows.filter((r) => !r.demo);
+
+/** Load the sample book on top of whatever the user has entered. */
 export function loadDemoBook(): void {
+  const { book } = bookStore.get();
+  const own = {
+    IN_STOCKS: ownRows(book.IN_STOCKS), US_STOCKS: ownRows(book.US_STOCKS),
+    MUTUAL_FUNDS: ownRows(book.MUTUAL_FUNDS), CRYPTO: ownRows(book.CRYPTO),
+    DIGITAL_METALS: ownRows(book.DIGITAL_METALS),
+  };
+  const hasOwn = Object.values(own).some((rows) => rows.length > 0);
   bookStore.set({
     book: {
-      IN_STOCKS: [...DEMO.IN_STOCKS],
-      US_STOCKS: [...DEMO.US_STOCKS],
-      MUTUAL_FUNDS: [...DEMO.MUTUAL_FUNDS],
-      CRYPTO: [...DEMO.CRYPTO],
-      DIGITAL_METALS: [...DEMO.DIGITAL_METALS],
+      IN_STOCKS: [...tagDemo(DEMO.IN_STOCKS), ...own.IN_STOCKS],
+      US_STOCKS: [...tagDemo(DEMO.US_STOCKS), ...own.US_STOCKS],
+      MUTUAL_FUNDS: [...tagDemo(DEMO.MUTUAL_FUNDS), ...own.MUTUAL_FUNDS],
+      CRYPTO: [...tagDemo(DEMO.CRYPTO), ...own.CRYPTO],
+      DIGITAL_METALS: [...tagDemo(DEMO.DIGITAL_METALS), ...own.DIGITAL_METALS],
     },
-    source: "demo",
+    source: hasOwn ? "mixed" : "demo",
   });
 }
 
+/**
+ * Remove the sample rows and only the sample rows.
+ *
+ * The first version cleared the whole book, which threw away holdings the
+ * user had typed in on top of the demo. Demo rows carry a `demo` flag from
+ * the moment they are loaded, so they can be taken out on their own.
+ */
+export function clearDemo(): void {
+  const { book } = bookStore.get();
+  const own: Book = {
+    IN_STOCKS: ownRows(book.IN_STOCKS), US_STOCKS: ownRows(book.US_STOCKS),
+    MUTUAL_FUNDS: ownRows(book.MUTUAL_FUNDS), CRYPTO: ownRows(book.CRYPTO),
+    DIGITAL_METALS: ownRows(book.DIGITAL_METALS),
+  };
+  const hasOwn = Object.values(own).some((rows) => rows.length > 0);
+  bookStore.set({ book: own, source: hasOwn ? "manual" : "empty" });
+}
+
+/** Empty the book entirely. Tests and sign-out; the UI offers `clearDemo`. */
 export function clearBook(): void {
   bookStore.set({ book: EMPTY_BOOK, source: "empty" });
 }

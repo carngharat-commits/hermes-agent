@@ -38,6 +38,12 @@ async function main() {
 
   const crashes = [];
   page.on("pageerror", (e) => crashes.push(e.message));
+  // React warnings and thrown-but-caught errors land here, not in pageerror.
+  // Failed subresources are reported separately by the browser and skipped.
+  const consoleErrors = [];
+  page.on("console", (m) => {
+    if (m.type() === "error" && !/Failed to load resource|net::ERR/.test(m.text())) consoleErrors.push(m.text());
+  });
 
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1200);
@@ -57,9 +63,18 @@ async function main() {
   await journeyAIChatNeverLeavesTheServer();
   await journeyQuotesFillBlanksButNeverOverwrite();
   await journeyTheBookFollowsTheUserNotTheBrowser();
+  await journeyEveryTabRenders();
+  await journeyOwnerAddsAnAccountAndChangesPassword();
+  await journeyASharedDeviceKeepsUsersApart();
+  await journeyKiteStubConnectRoundTrip();
+  await journeyOnAPhone(browser);
+  await journeyRiskViewsFollowTheBook();
+  await journeyClearDemoKeepsYourOwnRows();
 
   check("no uncaught page errors during any journey", crashes.length === 0,
     crashes.join("\n         "));
+  check("no console errors during any journey", consoleErrors.length === 0,
+    consoleErrors.slice(0, 5).join("\n         "));
 
   await browser.close();
   report();
@@ -438,6 +453,14 @@ async function journeyPhotoIsNotClaimedToBeRead() {
 // than failing.
 async function journeyEveryAICallIsExplainable() {
   console.log("\n— every AI call can be opened and explained —");
+  // Run one automation cycle the way the scheduler does. It must reason
+  // over the signed-in owner's book, so the calls it records carry the
+  // portfolio brakes — the scheduler used to run with no holdings at all.
+  const run = await page.evaluate(() => fetch("/api/intel/run", {
+    method: "POST", credentials: "same-origin",
+    headers: { "content-type": "application/json" }, body: "{}",
+  }).then((r) => r.json()));
+  check("an automation cycle runs from the UI's session", run.ok === true, JSON.stringify(run).slice(0, 200));
   await openTab("Portfolio");
   await page.getByText("Indian Equities").first().click();
   await page.waitForTimeout(1500);
@@ -650,6 +673,217 @@ async function journeyTheBookFollowsTheUserNotTheBrowser() {
   await openTab("Portfolio");
   check("signing in again restores it from the server",
     /\d{2,} holdings/.test(await mainText()));
+}
+
+const TABS = ["Dashboard", "Intelligence", "Portfolio", "Signals", "Opportunities",
+  "Calendar", "Risk Audit", "AI Performance", "Orders", "Algo", "Accounts", "Settings"];
+
+async function journeyEveryTabRenders() {
+  console.log("\n— every tab renders something —");
+  for (const tab of TABS) {
+    await openTab(tab);
+    const text = await mainText();
+    check(`${tab} renders`, text.length > 20, text.slice(0, 80));
+  }
+}
+
+const MEMBER = { name: "Ravi Menon", username: "ravi", password: "member-password-42" };
+
+async function signOut() {
+  await openTab("Settings");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: /^Sign out$/ }).click();
+  await page.locator("#username").waitFor({ timeout: 10000 });
+}
+
+async function signIn(username, password) {
+  await page.locator("#username").fill(username);
+  await page.locator("#password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForTimeout(1500);
+}
+
+async function journeyOwnerAddsAnAccountAndChangesPassword() {
+  console.log("\n— the owner adds an account; a user changes their password —");
+  await openTab("Settings");
+  const settings = await mainText();
+  check("the owner sees the accounts panel", /Accounts/.test(settings) && /@asha/.test(settings),
+    settings.slice(0, 200));
+
+  // Add a member (idempotent across runs: a second attempt is refused with a reason).
+  await page.getByLabel("New account name").fill(MEMBER.name);
+  await page.getByLabel("New account username").fill(MEMBER.username);
+  await page.getByLabel("New account password").fill(MEMBER.password);
+  await page.getByRole("button", { name: /Add account/ }).click();
+  await page.waitForTimeout(800);
+  const after = await mainText();
+  check("the member is listed or reported as already existing",
+    new RegExp(`@${MEMBER.username}`).test(after) || /taken/i.test(after), after.slice(-300));
+
+  // Change the owner's password, prove it took, change it back.
+  const temp = PASSWORD + "-changed";
+  await page.getByLabel("Current password").fill(PASSWORD);
+  await page.getByLabel("New password").fill(temp);
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.waitForTimeout(800);
+  check("the password change is confirmed", /Password changed/.test(await mainText()));
+  await signOut();
+  await signIn(USER, PASSWORD);
+  check("the old password no longer works", /don't match/i.test(await page.locator("body").innerText()));
+  await signIn(USER, temp);
+  check("the new one does", /Dashboard|Portfolio/.test(await page.locator("body").innerText()));
+  await openTab("Settings");
+  await page.getByLabel("Current password").fill(temp);
+  await page.getByLabel("New password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.waitForTimeout(800);
+  check("and can be changed back", /Password changed/.test(await mainText()));
+}
+
+async function journeyASharedDeviceKeepsUsersApart() {
+  console.log("\n— a shared device keeps users apart —");
+  await openTab("Portfolio");
+  check("the owner's book is loaded before the switch", /\d{2,} holdings/.test(await mainText()));
+  await signOut();
+  await signIn(MEMBER.username, MEMBER.password);
+  check("the member signs in", new RegExp(`@${MEMBER.username}`).test(await page.locator("body").innerText()));
+  await openTab("Portfolio");
+  const theirs = await mainText();
+  check("the member sees an empty book, not the owner's", /Your book is empty/.test(theirs) && /\b0 holdings\b/.test(theirs),
+    theirs.slice(0, 200));
+  await page.getByText("Manage").first().click();
+  await page.waitForTimeout(500);
+  check("and an empty watchlist", /Add your first script/.test(await mainText()));
+  await signOut();
+  await signIn(USER, PASSWORD);
+  await openTab("Portfolio");
+  check("the owner's book comes back on the same device", /\d{2,} holdings/.test(await mainText()));
+}
+
+async function journeyKiteStubConnectRoundTrip() {
+  console.log("\n— the Kite connect flow round-trips against the stub —");
+  await openTab("Accounts");
+  // The Accounts tab lists other brokers with their own Disconnect buttons;
+  // the Kite card is the first one on the page.
+  const kiteDisconnect = () => page.getByRole("button", { name: "Disconnect" }).first();
+  const connect = page.getByRole("button", { name: "Connect Zerodha" });
+  if (await connect.count() === 0) {
+    // Already connected from an earlier run: disconnect and start clean.
+    await kiteDisconnect().click();
+    await page.waitForTimeout(800);
+  }
+  await page.getByRole("button", { name: "Connect Zerodha" }).click();
+  // The stub bounces login → callback → back to the UI with ?kite=connected.
+  await page.waitForURL((u) => u.searchParams.has("kite") || u.searchParams.has("kite_error"), { timeout: 15000 });
+  const url = new URL(page.url());
+  check("the redirect comes back connected, not with an error",
+    url.searchParams.get("kite") === "connected", url.search);
+  await page.waitForTimeout(1500);                  // session re-check after the full navigation
+  await openTab("Accounts");
+  check("the account card shows the connected profile", /Connected as/.test(await mainText()));
+  await openTab("Portfolio");
+  const badge = (await mainText()).match(/kite live|kite stub|demo book|snapshot|empty/i)?.[0].toLowerCase();
+  check("the portfolio source badge says Kite stub", badge === "kite stub", String(badge));
+  await openTab("Accounts");
+  await kiteDisconnect().click();
+  // Disconnect reloads the whole app (holdings are read at the root), which
+  // lands on the Dashboard; go back to the card before looking at it.
+  await page.waitForLoadState("domcontentloaded");
+  await page.getByRole("button", { name: /^Accounts/ }).first().waitFor({ timeout: 15000 });
+  await page.waitForTimeout(1200);
+  await openTab("Accounts");
+  const reconnect = page.getByRole("button", { name: "Connect Zerodha" }).first();
+  const flipped = await reconnect.waitFor({ timeout: 8000 }).then(() => true).catch(() => false);
+  check("disconnecting returns the card to its connect state", flipped, (await mainText()).slice(0, 200));
+  await openTab("Portfolio");
+  const afterBadge = (await mainText()).match(/kite live|kite stub|demo book|snapshot|empty/i)?.[0].toLowerCase();
+  check("and the badge goes back to the user's own book", afterBadge !== "kite stub", String(afterBadge));
+}
+
+async function journeyOnAPhone(browser) {
+  console.log("\n— on a phone —");
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p = await phone.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(e.message));
+  await p.goto(BASE, { waitUntil: "domcontentloaded" });
+  await p.locator("#username").waitFor({ timeout: 20000 });
+  await p.locator("#username").fill(USER);
+  await p.locator("#password").fill(PASSWORD);
+  await p.getByRole("button", { name: "Sign in" }).click();
+  await p.waitForTimeout(1500);
+  check("phone: sign-in works", /Dashboard/.test(await p.locator("body").innerText()));
+  await p.getByRole("button", { name: "Open menu" }).click();
+  await p.waitForTimeout(400);
+  await p.getByRole("button", { name: /^Portfolio/ }).first().click();
+  await p.waitForTimeout(800);
+  const portfolio = (await p.locator("main").innerText()).trim();
+  check("phone: the menu opens and Portfolio renders", /Portfolio Tracking/.test(portfolio), portfolio.slice(0, 120));
+  check("phone: the book is the same one as on the desktop", /\d{2,} holdings/.test(portfolio));
+  const add = p.getByRole("button", { name: /Add Position/ }).first();
+  await add.scrollIntoViewIfNeeded();
+  await add.click();
+  await p.waitForTimeout(500);
+  check("phone: the add sheet opens", await p.locator(".fixed.inset-0.z-50").count() === 1);
+  const width = await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  check("phone: nothing scrolls sideways", width);
+  check("phone: no page errors", errors.length === 0, errors.join(" | "));
+  await phone.close();
+}
+
+// Found by lint, not by a test: five views memoised book-derived figures with
+// empty dependency arrays. Correct when the book was a module constant, stale
+// once it changed at runtime — clearing the demo left the risk views showing
+// the cleared book's numbers.
+async function journeyRiskViewsFollowTheBook() {
+  console.log("\n— the risk views follow the book —");
+  await openTab("Portfolio");
+  if (await page.getByRole("button", { name: /Load demo book/ }).count()) {
+    await page.getByRole("button", { name: /Load demo book/ }).click();
+    await page.waitForTimeout(500);
+  }
+  await openTab("Risk Audit");
+  const withBook = await mainText();
+  await openTab("Portfolio");
+  await page.getByRole("button", { name: /Clear demo/ }).click();
+  await page.waitForTimeout(500);
+  await openTab("Risk Audit");
+  const cleared = await mainText();
+  check("clearing the book changes what the risk views show", cleared !== withBook, cleared.slice(0, 160));
+  await openTab("Portfolio");
+  await page.getByRole("button", { name: /Load demo book/ }).click();
+  await page.waitForTimeout(500);
+  await openTab("Risk Audit");
+  check("and loading it again brings the same figures back", (await mainText()) === withBook);
+}
+
+// Found by the risk-views journey: "Clear demo" cleared the whole book,
+// including holdings the user had typed in on top of the demo.
+async function journeyClearDemoKeepsYourOwnRows() {
+  console.log("\n— clearing the demo keeps what you typed in —");
+  await openTab("Portfolio");
+  if (await page.getByRole("button", { name: /Load demo book/ }).count()) {
+    await page.getByRole("button", { name: /Load demo book/ }).click();
+    await page.waitForTimeout(400);
+  }
+  // WIPRO was added by hand earlier in the run; it must survive.
+  await page.getByRole("button", { name: /Clear demo/ }).click();
+  await page.waitForTimeout(600);
+  const after = await mainText();
+  // The badge is the tell: "Entered by you", not "Demo book" or "Empty".
+  // (The header now also offers "Load demo book", so match the badge, not
+  // the words "demo book" anywhere.)
+  check("the demo rows are gone but the book is not empty", !/Your book is empty/.test(after)
+    && /Entered by you/i.test(after), after.slice(0, 200));
+  await page.getByText("Indian Equities").first().click();
+  await page.waitForTimeout(800);
+  const drill = await mainText();
+  check("the holding typed in earlier is still there", /WIPRO/.test(drill), drill.slice(0, 200));
+  check("and the demo holdings are not", !/AXISBANK|RELIANCE/.test(drill));
+  await openTab("Portfolio");
+  await page.getByRole("button", { name: /Load demo book/ }).click();
+  await page.waitForTimeout(400);
+  check("loading the demo again marks the book as demo plus yours", /Demo \+ yours/i.test(await mainText()));
 }
 
 function report() {

@@ -24,7 +24,7 @@ export const TaxHarvestView = () => {
       }))
       .sort((a, b) => a.loss - b.loss);
     return rows;
-  }, []);
+  }, [IN_STOCKS]);  // the book changes at runtime now
 
   const toggle = (key) => setSelected(prev => ({ ...prev, [key]: !prev[key] }));
 

@@ -20,7 +20,7 @@ export const BigMovesView = () => {
     const s = new Set();
     [...IN_STOCKS, ...US_STOCKS].forEach(h => s.add(h.sym));
     return s;
-  }, []);
+  }, [IN_STOCKS, US_STOCKS]);  // the book changes at runtime now
 
   const filtered = useMemo(() => {
     return INVESTOR_MOVES.filter(m => {

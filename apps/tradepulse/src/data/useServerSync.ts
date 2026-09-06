@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import { bookStore } from "@/data/book";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 import { watchlistStore } from "@/data/watchlist";
 
 /**

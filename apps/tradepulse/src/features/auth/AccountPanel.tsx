@@ -5,7 +5,7 @@ import { addUser, changePassword, listUsers, type AuthUser } from "@/api/auth";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { Pill } from "@/components/ui/Pill";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 
 const input = (props: any) => (
   <input {...props} className="w-full rounded-lg px-3 py-2 text-[12.5px]"

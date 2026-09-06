@@ -55,6 +55,13 @@ export const PortfolioTab = ({
               <Trash2 size={12} /> Clear demo
             </Btn>
           )}
+          {/* With rows of your own and no demo, the empty-state card is gone;
+              the demo must still be reachable to lay alongside them. */}
+          {source === "manual" && onLoadDemo && (
+            <Btn variant="ghost" size="sm" onClick={onLoadDemo} title="Add the sample holdings alongside yours">
+              <FlaskConical size={12} /> Load demo book
+            </Btn>
+          )}
           <Btn onClick={onAdd}><Plus size={14} /> Add Position</Btn>
         </div>
       </div>

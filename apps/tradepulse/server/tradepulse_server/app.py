@@ -97,11 +97,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.refresh_cycle_inputs = refresh_cycle_inputs
 
+    def holdings_for_cycle() -> list[dict[str, Any]]:
+        """The owner's book, flattened to what the agents read.
+
+        Before the book lived on the server the cycle ran with no holdings
+        at all, so every portfolio brake abstained and the unattended calls
+        — which supersede the ones made from the UI — carried no portfolio
+        context. The explanation drawer then had nothing to say about the
+        book. A cycle must reason over the same holdings the user sees.
+        """
+        if app.state.cycle_holdings:
+            return app.state.cycle_holdings          # set explicitly by /api/intel/run
+        doc = app.state.documents.owner_document(app.state.auth, "book")
+        book = ((doc or {}).get("data") or {}).get("book") or {}
+        rows: list[dict[str, Any]] = []
+        for segment_rows in book.values():
+            for row in segment_rows or []:
+                sym = str(row.get("sym") or "").upper()
+                if sym and float(row.get("qty") or 0) > 0:
+                    rows.append({"sym": sym, "qty": float(row.get("qty") or 0),
+                                 "ltp": float(row.get("ltp") or 0)})
+        return rows
+
     def cycle_context() -> dict[str, Any]:
         """Read at fire time, not at startup, so each cycle sees today's state."""
         return {
             "prices": app.state.cycle_prices,
-            "holdings": app.state.cycle_holdings,
+            "holdings": holdings_for_cycle(),
             "refresh": app.state.refresh_cycle_inputs,
         }
 
@@ -645,7 +667,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prices = supplied or await refresh_cycle_inputs()
         result = await app.state.orchestrator.run_cycle(
             prices=prices,
-            holdings=payload.get("holdings") or [],
+            # No holdings given: the owner's book, the same as a scheduled run.
+            holdings=payload.get("holdings") or holdings_for_cycle(),
             trigger="manual",
         )
         return result.as_dict()

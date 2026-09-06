@@ -6,7 +6,7 @@ import { Activity } from "lucide-react";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { NAV, NAV_GROUPS } from "@/components/shell/nav";
 import { Pill } from "@/components/ui/Pill";
-import { initialsOf, useAuth } from "@/data/auth";
+import { initialsOf, useAuth } from "@/data/useAuth";
 
 const identity = (status: string, user?: { name: string; username: string } | null) =>
   status === "preview" ? { name: "Preview", handle: "no backend" }

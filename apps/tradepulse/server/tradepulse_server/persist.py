@@ -327,6 +327,19 @@ class SqliteUserDocuments:
             )
         return {"name": name, "data": data, "updated_at": now}
 
+    def owner_document(self, auth_store, name: str) -> dict | None:
+        """The first owner's copy of a document, for process-wide jobs.
+
+        The unattended cycle needs *a* book to reason about concentration,
+        and merging every user's holdings would misstate everyone's. In a
+        single-owner deployment this is simply the book; with several
+        accounts it is the owner's, and that is documented.
+        """
+        for user in auth_store.users():
+            if user.role == "owner":
+                return self.get(user.id, name)
+        return None
+
     def delete(self, user_id: int, name: str) -> bool:
         with self._lock, self._conn:
             return self._conn.execute(

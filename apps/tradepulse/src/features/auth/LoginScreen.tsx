@@ -3,7 +3,7 @@ import { Eye, EyeOff, LockKeyhole, UserPlus } from "lucide-react";
 
 import { Btn } from "@/components/ui/Btn";
 import { FONT_MONO, T } from "@/theme/tokens";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 
 /**
  * The lock in front of the app.

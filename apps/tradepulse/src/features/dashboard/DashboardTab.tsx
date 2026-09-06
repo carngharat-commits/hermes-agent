@@ -18,7 +18,7 @@ import { PortfolioHistoryChart } from "@/features/dashboard/PortfolioHistoryChar
 import { QuickAction } from "@/features/dashboard/QuickAction";
 import { SectorRotationView } from "@/features/dashboard/SectorRotationView";
 import { SegmentTile } from "@/features/dashboard/SegmentTile";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 import { inrCompact, pct, toINR_us } from "@/lib/format";
 
 export const DashboardTab = ({ holdings, setView }: any) => {

@@ -10,22 +10,34 @@ for a recommendation on each, so the explanation drawer has real evidence.
     cd server && PYTHONPATH=. ./.venv/bin/python seed_demo.py
 
 Idempotent: marks are keyed by (symbol, day) and a new recommendation simply
-supersedes the last. Needs the backend up on TRADEPULSE_PORT (default 8787).
+supersedes the last. Needs the backend up on TRADEPULSE_PORT (default 8787)
+and, since the routes are behind the login, an account to sign in with:
+TRADEPULSE_TEST_USER / TRADEPULSE_TEST_PASSWORD (defaults match journeys.mjs).
+The store path follows TRADEPULSE_DATA_DIR unless TRADEPULSE_INTEL_DB is set.
 """
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 import random
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from tradepulse_server.intel.store import IntelStore
 
 BASE = f"http://127.0.0.1:{os.environ.get('TRADEPULSE_PORT', '8787')}"
-DB = os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db")
+DATA_DIR = os.environ.get("TRADEPULSE_DATA_DIR", "data")
+DB = os.environ.get("TRADEPULSE_INTEL_DB", str(Path(DATA_DIR) / "tradepulse.db"))
+USER = os.environ.get("TRADEPULSE_TEST_USER", "asha")
+PASSWORD = os.environ.get("TRADEPULSE_TEST_PASSWORD", "correct-horse-battery-9")
+
+# One cookie jar for the run, so the login's session cookie rides on every call.
+_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
 # Prices match the demo book so the holdings screen and the call agree.
 HOLDINGS = [
@@ -42,11 +54,24 @@ def post(path: str, body: dict) -> dict:
         BASE + path, method="POST", data=json.dumps(body).encode(),
         headers={"content-type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with _opener.open(req, timeout=30) as resp:
         return json.load(resp)
 
 
+def sign_in() -> None:
+    """Sign in, or create the first account if this is a fresh install."""
+    session = json.load(_opener.open(BASE + "/api/auth/session", timeout=10))
+    if not session.get("required"):
+        return
+    creds = {"username": USER, "password": PASSWORD, "name": "Asha Rao"}
+    try:
+        post("/api/auth/setup" if session.get("setup_required") else "/api/auth/login", creds)
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"could not sign in as {USER}: HTTP {exc.code} — set TRADEPULSE_TEST_USER/PASSWORD")
+
+
 def main() -> int:
+    sign_in()
     store = IntelStore(DB)
     random.seed(7)
     paths = {h["sym"]: h["ltp"] * 0.82 for h in HOLDINGS}   # walk up into today

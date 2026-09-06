@@ -13,7 +13,7 @@ import { RoadmapCard } from "@/features/settings/RoadmapCard";
 import { SettingRow } from "@/features/settings/SettingRow";
 import { Toggle3 } from "@/features/settings/Toggle3";
 import { ToggleRow } from "@/features/settings/ToggleRow";
-import { useAuth } from "@/data/auth";
+import { useAuth } from "@/data/useAuth";
 import { AccountPanel } from "@/features/auth/AccountPanel";
 import { useThemeMode } from "@/theme/ThemeContext";
 

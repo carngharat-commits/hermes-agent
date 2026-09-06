@@ -38,7 +38,7 @@ export const BetaStressView = () => {
       (weightedBeta * inCV + 0.85 * usCV + 0.95 * mfCV + 2.0 * crCV) / total;
 
     return { inCV, usCV, mfCV, crCV, total, blendedBeta };
-  }, []);
+  }, [inH, US_STOCKS, MUTUAL_FUNDS, CRYPTO]);  // the book changes at runtime now
 
   const beta = totals.blendedBeta;
   const interp = beta < 0.7 ? "Defensive · lower volatility than market"

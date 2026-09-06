@@ -45,9 +45,9 @@ to `.env` and fill it in to talk to the real thing.
 | `npm run build` | `tsc -b` then a production bundle into `dist/` |
 | `npm run typecheck` | Types only |
 | `npm run lint` | ESLint |
-| `node scripts/smoke.mjs` | Drives every tab + the Kite flow in Chromium (see header for setup) |
-| `node scripts/journeys.mjs` | Full add/edit/remove journeys with dummy data, every segment |
-| `cd server && pytest` | Backend tests (186, no network) |
+| `node scripts/journeys.mjs` | Chromium journeys: sign-in, every tab, add/edit/remove in every segment, AI explanations, quotes, accounts, shared-device isolation, the Kite stub flow, a phone viewport |
+| `node scripts/prototype-check.mjs <file.html>` | Drives the self-contained prototype with no backend |
+| `cd server && pytest` | Backend tests, no network |
 | `cd server && python simulate.py` | End-to-end simulation printing input and output at each stage |
 | `cd server && python simulate_automation.py` | 12 orchestrated cycles over a simulated year — shows whether the loop learns |
 

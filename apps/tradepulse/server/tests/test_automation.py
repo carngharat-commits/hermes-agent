@@ -395,3 +395,43 @@ def test_a_live_cycle_still_stamps_now_by_default():
     series = service.store.price_series("TCS")
     assert series
     assert all(row["observed_at"] >= before for row in series)
+
+
+# --- the unattended cycle reasons over the owner's book ---------------------
+# Found by the browser journeys: the scheduler ran with no holdings, so every
+# portfolio brake abstained, and its calls superseded the ones made from the
+# UI with context. The drawer then had nothing to say about the book.
+
+def test_the_scheduled_cycle_uses_the_owners_book():
+    import asyncio
+    from fastapi.testclient import TestClient
+    from tradepulse_server.app import create_app
+    from tradepulse_server.config import Settings
+
+    app = create_app(Settings(intel_db_path=":memory:", state_secret="s"))
+    c = TestClient(app)
+    c.post("/api/auth/setup", json={"username": "asha", "password": "correct-horse-battery-9", "name": "Asha"})
+    c.put("/api/me/book", json={"data": {"book": {
+        "IN_STOCKS": [{"sym": "RELIANCE", "qty": 40, "ltp": 1275.9}, {"sym": "TCS", "qty": 8, "ltp": 3120.0}],
+    }, "source": "manual"}})
+
+    context = app.state.scheduler.context()
+    assert {h["sym"] for h in context["holdings"]} == {"RELIANCE", "TCS"}
+
+    # A cycle with no holdings passed in reads them from the book.
+    result = asyncio.run(app.state.orchestrator.run_cycle(
+        prices={"RELIANCE": 1275.9}, holdings=context["holdings"], trigger="test"))
+    assert result.ok
+    rec = app.state.intel.store.current_recommendation("RELIANCE")
+    spoke = {row["agent"] for row in rec["evidence"]["contributing"]}
+    assert "portfolio_risk" in spoke          # the brake had a book to read
+
+    # The manual trigger with no holdings in the body does the same. With no
+    # quote provider configured a cycle prices from stored marks — pretend
+    # prices must never feed the learning loop — so it can only re-call
+    # RELIANCE, the one symbol with a mark on file.
+    body = c.post("/api/intel/run", json={}).json()
+    assert body["ok"] is True
+    latest = app.state.intel.store.current_recommendation("RELIANCE")
+    assert latest["version"] == rec["version"] + 1          # a fresh call, not the old one
+    assert "portfolio_risk" in {row["agent"] for row in latest["evidence"]["contributing"]}

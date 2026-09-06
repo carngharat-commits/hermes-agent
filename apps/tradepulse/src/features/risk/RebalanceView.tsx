@@ -26,7 +26,7 @@ export const RebalanceView = () => {
     const cashCV = 96478; // ABML available balance from your statement
     const total = inCV + usCV + mfCV + crCV + pmCV + cashCV;
     return { IN_EQ: inCV, US_EQ: usCV, MF: mfCV, PM: pmCV, CR: crCV, CASH: cashCV, total };
-  }, []);
+  }, [IN_STOCKS, US_STOCKS, MUTUAL_FUNDS, CRYPTO, DIGITAL_METALS]);  // the book changes at runtime now
 
   const rows = [
     { k:"IN_EQ", l:"Indian Eq", c: T.info },

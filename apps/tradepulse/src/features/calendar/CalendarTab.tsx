@@ -19,7 +19,7 @@ export const CalendarTab = () => {
   const holdingSyms = useMemo(() => new Set([
     ...IN_STOCKS.map(h => h.sym),
     ...US_STOCKS.map(h => h.sym),
-  ]), []);
+  ]), [IN_STOCKS, US_STOCKS]);  // the book changes at runtime now
   const today = new Date("2026-07-31");
   const cutoff = new Date(today);
   cutoff.setDate(today.getDate() + horizon);

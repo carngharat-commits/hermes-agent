@@ -16,7 +16,7 @@ export const TopBar = ({ toggleMobile, viewLabel }: any) => {
       <header className="sticky top-0 z-20 flex items-center justify-between px-4 lg:px-6 h-14 backdrop-blur"
         style={{ background: T.overlayBg, borderBottom: `1px solid ${T.border}` }}>
         <div className="flex items-center gap-3">
-          <button className="lg:hidden p-1.5 rounded-md" onClick={toggleMobile} style={{ background: T.card2 }}>
+          <button className="lg:hidden p-1.5 rounded-md" onClick={toggleMobile} style={{ background: T.card2 }} aria-label="Open menu">
             <Menu size={16} color={T.fg} />
           </button>
           <div>

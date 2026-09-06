@@ -8,36 +8,13 @@
  * the lock: with no backend there is nothing behind it to reach.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   getAuthSession, login as apiLogin, logout as apiLogout, setupFirstAccount,
   type AuthUser, type Credentials, type NewAccount,
 } from "@/api/auth";
-
-export type AuthStatus =
-  | "checking"        // first request in flight
-  | "setup"           // backend answered: no accounts yet — create the first
-  | "anonymous"       // backend answered: sign in
-  | "authenticated"   // backend answered: in
-  | "unreachable"     // no backend (network error) — offer the preview
-  | "preview";        // user chose to look around without a backend
-
-type AuthState = {
-  status: AuthStatus;
-  user: AuthUser | null;
-  required: boolean;
-  error: string | null;
-  login: (credentials: Credentials) => Promise<boolean>;
-  setup: (account: NewAccount) => Promise<boolean>;
-  logout: () => Promise<void>;
-  enterPreview: () => void;
-};
-
-const AuthContext = createContext<AuthState | null>(null);
-
-export const initialsOf = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "TP";
+import { AuthContext, type AuthState, type AuthStatus } from "@/data/useAuth";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("checking");
@@ -100,10 +77,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [status, user, required, error, login, setup, logout, enterPreview],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthState {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth() needs an <AuthProvider> above it");
-  return ctx;
 }

@@ -14,7 +14,7 @@ import { IntelligenceTab } from "@/features/intelligence/IntelligenceTab";
 import { OpportunitiesTab } from "@/features/opportunities/OpportunitiesTab";
 import { OrdersTab } from "@/features/orders/OrdersTab";
 import { PortfolioTab } from "@/features/portfolio/PortfolioTab";
-import { clearBook, loadDemoBook } from "@/data/book";
+import { clearDemo, loadDemoBook } from "@/data/book";
 import { addToWatchlist, removeFromWatchlist, useWatchlist } from "@/data/watchlist";
 import { PerformanceTab } from "@/features/performance/PerformanceTab";
 import { RiskAuditTab } from "@/features/risk/RiskAuditTab";
@@ -97,7 +97,7 @@ export default function TradePulse() {
       onOpenWatchlist={() => setWatchOpen(true)}
       onAdd={() => openAdd("holding")}
       onLoadDemo={loadDemoBook}
-      onClearDemo={clearBook}
+      onClearDemo={clearDemo}
       onConnect={() => setView("accounts")} />;
   };
 
