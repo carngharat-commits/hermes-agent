@@ -1,0 +1,10 @@
+# TLS is automatic: Caddy obtains and renews a certificate for the domain.
+{$TRADEPULSE_DOMAIN} {
+    encode gzip
+    reverse_proxy app:8787
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}

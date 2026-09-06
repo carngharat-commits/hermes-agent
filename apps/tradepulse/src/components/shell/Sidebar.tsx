@@ -8,13 +8,14 @@ import { NAV, NAV_GROUPS } from "@/components/shell/nav";
 import { Pill } from "@/components/ui/Pill";
 import { initialsOf, useAuth } from "@/data/auth";
 
-const identity = (status: string, name?: string) =>
+const identity = (status: string, user?: { name: string; username: string } | null) =>
   status === "preview" ? { name: "Preview", handle: "no backend" }
-  : { name: name ?? "Investor", handle: status === "authenticated" ? "signed in" : "not signed in" };
+  : { name: user?.name ?? "Investor",
+      handle: status === "authenticated" && user ? `@${user.username} · signed in` : "not signed in" };
 
 export const Sidebar = ({ view, setView, mobileOpen, closeMobile }: any) => {
   const { status, user } = useAuth();
-  const who = identity(status, user?.name);
+  const who = identity(status, user);
   return (
   <>
     {/* Mobile overlay */}

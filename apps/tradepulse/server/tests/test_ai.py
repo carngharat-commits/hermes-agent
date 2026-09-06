@@ -129,7 +129,7 @@ def test_the_key_is_never_in_any_response(client: TestClient):
 
 
 def test_chat_is_behind_the_login():
-    app = create_app(Settings(intel_db_path=":memory:", state_secret="s", passcode="p"))
+    app = create_app(Settings(intel_db_path=":memory:", state_secret="s"))
     c = TestClient(app)
     assert c.post("/api/ai/chat", json={"messages": []}).status_code == 401
     assert c.get("/api/ai/status").status_code == 401

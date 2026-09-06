@@ -35,9 +35,12 @@ from .mapping import (
     summarize,
 )
 from .ai import AIChat, build_client
-from .auth import OPEN_PATHS, AuthStore, passcode_matches, resolve_passcode
-from .persist import SqliteAuthStore, SqliteSessionStore
+from .auth import (
+    OPEN_PATHS, AuthSession, validate_password, validate_username,
+)
+from .persist import DOCUMENT_NAMES, SqliteAuthStore, SqliteSessionStore, SqliteUserDocuments
 from .quotes import QuotePriceSource, QuoteService, build_http_provider
+from .static import mount_ui
 from .sessions import SessionStore, issue_state, verify_state
 
 STATE_PARAM = "tp_state"
@@ -67,8 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = store
     app.state.auth = SqliteAuthStore(settings.sessions_db_path)
+    app.state.documents = SqliteUserDocuments(settings.sessions_db_path)
     app.state.ai = AIChat(build_client(settings.anthropic_api_key), settings.ai_model)
-    app.state.passcode = resolve_passcode(settings.passcode, required=settings.auth_required)
     app.state.kite = client
     app.state.cache = TTLCache()
     # The intelligence store outlives the process when a path is set; the
@@ -115,7 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.frontend_url.rstrip("/")],
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT"],
         allow_headers=["*"],
     )
 
@@ -176,56 +179,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
-    @app.get("/api/auth/session")
-    async def auth_session(
-        request: Request, cfg: Settings = Depends(current_settings),
-    ) -> dict[str, Any]:
+    def _current_user(request: Request) -> AuthSession | None:
+        cfg: Settings = app.state.settings
         if not cfg.auth_required:
-            return {"authenticated": True, "required": False,
-                    "user": {"name": cfg.user_name}}
-        session = app.state.auth.get(request.cookies.get(cfg.auth_cookie_name))
-        if session is None:
-            return {"authenticated": False, "required": True}
-        return {"authenticated": True, "required": True,
-                "user": {"name": session.user_name}}
+            # The lock is off: everyone is the owner. Tests and nothing else.
+            return AuthSession(user_id=0, username="local", user_name="Investor",
+                               role="owner", created_at=0.0)
+        return app.state.auth.get(request.cookies.get(cfg.auth_cookie_name))
 
-    @app.post("/api/auth/login")
-    async def auth_login(
-        request: Request, payload: dict[str, Any],
-        cfg: Settings = Depends(current_settings),
-    ) -> Any:
-        client = _client_address(request)
-        auth: AuthStore = app.state.auth
-        if auth.locked_out(client):
-            return JSONResponse(
-                status_code=429,
-                content={"error": "Too many attempts. Try again in 15 minutes.",
-                         "error_type": "LockedOut"},
-            )
-        supplied = str(payload.get("passcode") or "")
-        if not passcode_matches(app.state.passcode, supplied):
-            auth.record_failure(client)
-            return JSONResponse(
-                status_code=401,
-                content={"error": "That passcode is not right.", "error_type": "BadPasscode"},
-            )
-        auth.clear_failures(client)
-        token = auth.create(cfg.user_name)
-        response = JSONResponse({"authenticated": True, "required": cfg.auth_required,
-                                 "user": {"name": cfg.user_name}})
+    def _signed_in(session: AuthSession, cfg: Settings) -> JSONResponse:
+        token = app.state.auth.create(app.state.auth.get_user(session.user_id))
+        response = JSONResponse({"authenticated": True, "required": True,
+                                 "setup_required": False, "user": session.public_view()})
         response.set_cookie(
             cfg.auth_cookie_name, token, httponly=True, secure=cfg.cookie_secure,
             samesite=cfg.cookie_samesite, max_age=7 * 24 * 60 * 60, path="/",
         )
         return response
 
+    def _bad(status: int, message: str, error_type: str) -> JSONResponse:
+        return JSONResponse(status_code=status, content={"error": message, "error_type": error_type})
+
+    def _session_for(user) -> AuthSession:
+        import time as _time
+        return AuthSession(user_id=user.id, username=user.username, user_name=user.name,
+                           role=user.role, created_at=_time.time())
+
+    @app.get("/api/auth/session")
+    async def auth_session(request: Request, cfg: Settings = Depends(current_settings)) -> dict[str, Any]:
+        if not cfg.auth_required:
+            return {"authenticated": True, "required": False, "setup_required": False,
+                    "user": _current_user(request).public_view()}
+        setup_required = app.state.auth.user_count() == 0
+        session = app.state.auth.get(request.cookies.get(cfg.auth_cookie_name))
+        if session is None:
+            return {"authenticated": False, "required": True, "setup_required": setup_required}
+        return {"authenticated": True, "required": True, "setup_required": False,
+                "user": session.public_view()}
+
+    @app.post("/api/auth/setup")
+    async def auth_setup(payload: dict[str, Any], cfg: Settings = Depends(current_settings)) -> Any:
+        """Create the first account. Only ever works once."""
+        if app.state.auth.user_count() > 0:
+            return _bad(409, "An account already exists. Sign in, or ask the owner to add you.",
+                        "SetupDone")
+        username = str(payload.get("username") or "").strip().lower()
+        password = str(payload.get("password") or "")
+        name = str(payload.get("name") or "").strip()[:60]
+        problem = validate_username(username) or validate_password(password)
+        if problem:
+            return _bad(400, problem, "Invalid")
+        user = app.state.auth.create_user(username, password, name or username, role="owner")
+        return _signed_in(_session_for(user), cfg)
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request, payload: dict[str, Any],
+                         cfg: Settings = Depends(current_settings)) -> Any:
+        username = str(payload.get("username") or "").strip().lower()
+        password = str(payload.get("password") or "")
+        guard = app.state.auth.lockout
+        keys = (f"ip:{_client_address(request)}", f"user:{username}")
+        if any(guard.locked_out(k) for k in keys):
+            return _bad(429, "Too many attempts. Try again in 15 minutes.", "LockedOut")
+        user = app.state.auth.verify(username, password)
+        if user is None:
+            for k in keys:
+                guard.record_failure(k)
+            return _bad(401, "That username and password don't match.", "BadCredentials")
+        for k in keys:
+            guard.clear(k)
+        return _signed_in(_session_for(user), cfg)
+
     @app.post("/api/auth/logout")
-    async def auth_logout(
-        request: Request,
-        cfg: Settings = Depends(current_settings),
-        store: SessionStore = Depends(current_store),
-        kite: KiteClient = Depends(current_client),
-    ) -> JSONResponse:
+    async def auth_logout(request: Request, cfg: Settings = Depends(current_settings),
+                          store: SessionStore = Depends(current_store),
+                          kite: KiteClient = Depends(current_client)) -> JSONResponse:
         """Sign out of the app, and drop the broker session with it.
 
         A signed-out browser must not keep a live bearer token for the
@@ -242,6 +270,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(cfg.auth_cookie_name, path="/")
         response.delete_cookie(cfg.cookie_name, path="/")
         return response
+
+    @app.post("/api/auth/password")
+    async def auth_password(request: Request, payload: dict[str, Any]) -> Any:
+        me = _current_user(request)
+        if me is None or me.user_id == 0:
+            return _bad(401, "Sign in first.", "LoginRequired")
+        current = str(payload.get("current") or "")
+        new = str(payload.get("new") or "")
+        if app.state.auth.verify(me.username, current) is None:
+            return _bad(401, "Your current password is not right.", "BadCredentials")
+        problem = validate_password(new)
+        if problem:
+            return _bad(400, problem, "Invalid")
+        app.state.auth.set_password(me.user_id, new)
+        return {"ok": True}
+
+    @app.get("/api/auth/users")
+    async def auth_users(request: Request) -> Any:
+        me = _current_user(request)
+        if me is None or not me.is_owner:
+            return _bad(403, "Only the owner can see accounts.", "OwnerOnly")
+        return {"users": [u.public_view() for u in app.state.auth.users()]}
+
+    @app.post("/api/auth/users")
+    async def auth_add_user(request: Request, payload: dict[str, Any]) -> Any:
+        me = _current_user(request)
+        if me is None or not me.is_owner:
+            return _bad(403, "Only the owner can add accounts.", "OwnerOnly")
+        username = str(payload.get("username") or "").strip().lower()
+        password = str(payload.get("password") or "")
+        name = str(payload.get("name") or "").strip()[:60]
+        role = str(payload.get("role") or "member")
+        if role not in ("owner", "member"):
+            return _bad(400, "Role must be owner or member.", "Invalid")
+        problem = validate_username(username) or validate_password(password)
+        if problem:
+            return _bad(400, problem, "Invalid")
+        if app.state.auth.find_user(username) is not None:
+            return _bad(409, "That username is taken.", "Taken")
+        user = app.state.auth.create_user(username, password, name or username, role=role)
+        return {"user": user.public_view()}
+
+    # -- the signed-in user's own documents ---------------------------------
+
+    @app.get("/api/me/{name}")
+    async def me_get(name: str, request: Request) -> Any:
+        me = _current_user(request)
+        if me is None:
+            return _bad(401, "Sign in first.", "LoginRequired")
+        if name not in DOCUMENT_NAMES:
+            return _bad(404, f"No such document: {name}", "NotFound")
+        return app.state.documents.get(me.user_id, name) or {"name": name, "data": None, "updated_at": None}
+
+    @app.put("/api/me/{name}")
+    async def me_put(name: str, request: Request, payload: dict[str, Any]) -> Any:
+        me = _current_user(request)
+        if me is None:
+            return _bad(401, "Sign in first.", "LoginRequired")
+        if name not in DOCUMENT_NAMES:
+            return _bad(404, f"No such document: {name}", "NotFound")
+        if "data" not in payload:
+            return _bad(400, "Send {\"data\": …}.", "Invalid")
+        try:
+            return app.state.documents.put(me.user_id, name, payload["data"])
+        except ValueError as exc:
+            return _bad(413, str(exc), "TooLarge")
 
     # -- quotes, with or without a broker ------------------------------------
 
@@ -599,6 +693,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ("margins", "/user/margins"),
     ):
         _mount_passthrough(app, name, path, current_store, current_client)
+
+    # Last, so every API route above is matched before the page fallback.
+    app.state.serves_ui = bool(settings.static_dir) and mount_ui(app, settings.static_dir)
 
     return app
 

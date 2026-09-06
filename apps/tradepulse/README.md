@@ -11,7 +11,8 @@ looking at.
 
 ## Running it
 
-Two processes. Backend first:
+For a deployment — one container, one URL, TLS in front — see `DEPLOY.md`.
+For development, two processes. Backend first:
 
 ```bash
 cd server
@@ -145,20 +146,21 @@ rate limits.
 
 ## Sign-in
 
-Only the broker routes used to check a session; every other screen — the
-book, the watchlist, the AI calls, the performance record — was open to anyone
-who reached the URL. The gap is easy to miss because the broker connection
-*looks* like a login. It is not one: it proves a Zerodha account, not that
-this person may use this deployment.
+Only the broker routes used to check a session; every other screen was open
+to anyone who reached the URL. The broker connection *looks* like a login
+and is not one: it proves a Zerodha account, not that this person may use
+this deployment.
 
-The backend now refuses every `/api` route without its own session cookie,
-issued by `POST /api/auth/login` against `TRADEPULSE_PASSCODE`. One shared
-passcode is the smallest thing that is actually a lock for a single-user app;
-multi-user arrives with a users table, not with this growing. The compare is
-constant-time, five failures lock a client out for fifteen minutes, and an
-unset passcode never means open — the backend prints a one-time one at start,
-the way Jupyter does. Signing out drops the broker session too, so a shared
-browser cannot inherit a live token for the trading account.
+The backend now refuses every `/api` route without its own session cookie.
+Accounts have a username, a display name, a role and a password; passwords
+are hashed with PBKDF2-HMAC-SHA256 (600,000 iterations, per-user salt) and
+nothing reversible is stored. On a fresh install the sign-in screen offers to
+create the first account, which becomes the owner and adds everyone else from
+Settings — there is no open sign-up, because a public URL with open sign-up
+is a spam target before it is a product. Five failures lock a client address
+or a username out for fifteen minutes, an unknown username takes the same
+time to refuse as a wrong password, and signing out drops the broker session
+too, so a shared browser cannot inherit a live token for the trading account.
 
 The published prototype has no backend, so it cannot sign anyone in and has
 nothing private behind it. It offers a read-only preview and says so on
@@ -202,22 +204,27 @@ owner-only SQLite file under `server/data/`, the secret is generated once and
 kept beside it, and the session cookie is `Secure` by default anywhere the UI
 is not served from this machine. Details in `server/README.md`.
 
-## The book starts empty
+## The book starts empty, and follows the user
 
 The first version shipped a real person's holdings as bundled constants that
 eight views imported directly. Fine for a personal dashboard; a blocker for
 anything public, since every visitor saw that book.
 
-Holdings now live in `src/data/book.ts`: an external store that starts empty,
-persists in this browser's localStorage only, and is what every view reads.
+Holdings now live in `src/data/book.ts` and the watchlist in
+`src/data/watchlist.ts`, both on one small `PersistedStore`: in memory,
+mirrored to this browser, and — once signed in — mirrored to the server as
+the user's own documents (`GET`/`PUT /api/me/book`, `/api/me/watchlist`).
+The rules, in order: on sign-in the server's copy wins when it has one; if it
+has none and this browser does, the browser's copy is pushed up once, which
+migrates browsers that predate accounts; every later change is pushed,
+debounced; and on sign-out the local copy is cleared, so a shared device does
+not hand the next person the last person's book. In the read-only preview
+there is no server, and the stores behave as they always did.
+
 A first-time visitor sees "Your book is empty" with three ways in — add a
 position, connect Zerodha, or load the demo book. The demo (`demoBook.ts`) is
 sample data, labelled as such on the source badge, and can be cleared with one
-click. Rows a user types in land in the same store, so the risk, calendar and
-intelligence views see them exactly as they see a demo or a broker sync.
-
-No name, location or filing status is baked in anywhere; the sidebar shows a
-placeholder until a login exists.
+click. No name, location or filing status is baked in anywhere.
 
 ## Where the AI shows up
 

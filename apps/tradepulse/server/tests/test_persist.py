@@ -35,11 +35,15 @@ def test_a_broker_session_survives_a_restart(tmp_path):
     assert second.get(sid) is None
 
 
-def test_a_login_session_survives_a_restart(tmp_path):
+def test_an_account_and_its_login_survive_a_restart(tmp_path):
     path = tmp_path / "sessions.db"
-    token = SqliteAuthStore(path).create("Asha")
-    again = SqliteAuthStore(path)
-    assert again.get(token).user_name == "Asha"
+    first = SqliteAuthStore(path)
+    user = first.create_user("asha", "correct-horse-battery-9", "Asha Rao", role="owner")
+    token = first.create(user)
+
+    again = SqliteAuthStore(path)                 # "the process came back"
+    assert again.get(token).user_name == "Asha Rao"
+    assert again.verify("asha", "correct-horse-battery-9").id == user.id
     assert len(again) == 1
     again.pop(token)
     assert len(again) == 0

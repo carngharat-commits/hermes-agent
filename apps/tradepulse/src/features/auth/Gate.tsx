@@ -1,10 +1,14 @@
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { FONT_MONO, T } from "@/theme/tokens";
 import { useAuth } from "@/data/auth";
+import { useServerSync } from "@/data/useServerSync";
 
 /** Shows the login until the backend says this browser is in. */
 export const Gate = ({ children }: { children: React.ReactNode }) => {
   const { status } = useAuth();
+  // Lives here, not in the app: the app unmounts on sign-out, and the
+  // sign-out clear must run *after* that, from something still mounted.
+  useServerSync();
   if (status === "checking") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: T.bg }}>
@@ -12,7 +16,7 @@ export const Gate = ({ children }: { children: React.ReactNode }) => {
       </div>
     );
   }
-  if (status === "anonymous" || status === "unreachable") return <LoginScreen />;
+  if (status === "anonymous" || status === "setup" || status === "unreachable") return <LoginScreen />;
   return (
     <>
       {children}

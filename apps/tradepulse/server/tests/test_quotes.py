@@ -137,7 +137,7 @@ def test_price_feed_uses_the_http_provider_before_stale_marks():
 # --- route ------------------------------------------------------------------
 
 def test_quotes_route_is_behind_the_login():
-    c = TestClient(create_app(Settings(intel_db_path=":memory:", state_secret="s", passcode="p")))
+    c = TestClient(create_app(Settings(intel_db_path=":memory:", state_secret="s")))
     assert c.get("/api/quotes?symbols=TCS").status_code == 401
 
 

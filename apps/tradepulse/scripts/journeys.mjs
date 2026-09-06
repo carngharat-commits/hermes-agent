@@ -15,8 +15,10 @@
 import { chromium } from "playwright";
 
 const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:5273";
-// The backend under test must be started with this passcode.
-const PASSCODE = process.env.TRADEPULSE_PASSCODE ?? "demo-pass";
+// The account the journeys use. On a fresh backend it is created from the
+// first-run screen; on one that already has it, the journeys sign in.
+const USER = process.env.TRADEPULSE_TEST_USER ?? "asha";
+const PASSWORD = process.env.TRADEPULSE_TEST_PASSWORD ?? "correct-horse-battery-9";
 
 const results = [];
 let browser;
@@ -54,6 +56,7 @@ async function main() {
   await journeyWatchlistShowsIntelligenceOnlyWhenPriced();
   await journeyAIChatNeverLeavesTheServer();
   await journeyQuotesFillBlanksButNeverOverwrite();
+  await journeyTheBookFollowsTheUserNotTheBrowser();
 
   check("no uncaught page errors during any journey", crashes.length === 0,
     crashes.join("\n         "));
@@ -147,35 +150,63 @@ async function mainText() {
 async function journeyTheDoorIsLocked() {
   console.log("\n— the app is locked until you sign in —");
   // A cold dev server can take seconds to serve the first bundle; wait for
-  // the form rather than a fixed delay, so the first assertion reads a
-  // rendered page and not an empty body.
-  await page.locator("#passcode").waitFor({ timeout: 20000 });
+  // the form rather than a fixed delay.
+  await page.locator("#username").waitFor({ timeout: 20000 });
   const body = await page.locator("body").innerText();
-  check("a visitor sees the sign-in, not the app", /Sign in to continue/.test(body)
-    && !/Portfolio Tracking/.test(body), body.slice(0, 200));
+  check("a visitor sees a sign-in or first-run screen, not the app",
+    /Sign in to continue|Create the first account/.test(body) && !/Portfolio Tracking/.test(body),
+    body.slice(0, 200));
 
   // The lock is on the server, not just the screen.
   const status = await page.evaluate(() =>
     fetch("/api/intel/coverage", { credentials: "same-origin" }).then((r) => r.status));
   check("the API refuses without a session", status === 401, `HTTP ${status}`);
 
-  await page.locator("#passcode").fill("not-the-passcode");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForTimeout(500);
-  check("a wrong passcode is refused, with a reason",
-    /not right/i.test(await page.locator("body").innerText()));
+  if (/Create the first account/.test(body)) {
+    // Fresh install: create the owner. Nobody else can — there is no sign-up.
+    await page.locator("#name").fill("Asha Rao");
+    await page.locator("#username").fill(USER);
+    await page.locator("#password").fill(PASSWORD);
+    await page.locator("#confirm").fill(PASSWORD);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await page.waitForTimeout(900);
+    check("the first account is created and signed in",
+      /Dashboard|Portfolio/.test(await page.locator("body").innerText()));
+    // Sign out again so the sign-in path is exercised too.
+    await openTab("Settings");
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: /^Sign out$/ }).click();
+    await page.locator("#username").waitFor({ timeout: 10000 });
+    check("signing out returns to the sign-in screen",
+      /Sign in to continue/.test(await page.locator("body").innerText()));
+  }
 
-  await page.locator("#passcode").fill(PASSCODE);
+  await page.locator("#username").fill(USER);
+  await page.locator("#password").fill("not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForTimeout(600);
+  check("a wrong password is refused, with a reason",
+    /don't match/i.test(await page.locator("body").innerText()));
+
+  await page.locator("#password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForTimeout(900);
   const inside = await page.locator("body").innerText();
-  check("the right passcode opens the app", /Dashboard|Portfolio/.test(inside)
+  check("the right password opens the app", /Dashboard|Portfolio/.test(inside)
     && !/Sign in to continue/.test(inside), inside.slice(0, 200));
-  check("the sidebar shows who is signed in", /signed in/i.test(inside));
+  check("the sidebar shows who is signed in", new RegExp(`@${USER}`).test(inside));
 
   const after = await page.evaluate(() =>
     fetch("/api/intel/coverage", { credentials: "same-origin" }).then((r) => r.status));
   check("the API answers once signed in", after === 200, `HTTP ${after}`);
+
+  // Cheap direct check that setup is closed for good.
+  const setupAgain = await page.evaluate(() => fetch("/api/auth/setup", {
+    method: "POST", credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "intruder", password: "twelve-characters", name: "x" }),
+  }).then((r) => r.status));
+  check("first-run setup cannot be repeated", setupAgain === 409, `HTTP ${setupAgain}`);
 }
 
 // The app used to ship a real person's 126-row book as bundled constants, so
@@ -183,9 +214,23 @@ async function journeyTheDoorIsLocked() {
 // runs first because every later journey assumes the demo book is loaded.
 async function journeyFirstRunIsEmptyUntilAsked() {
   console.log("\n— first run starts empty; the demo book is opt-in —");
+  // The book follows the account now, so a returning account is not a fresh
+  // one. Reset this account's documents through the API, as a new account
+  // would be, then reload so the app pulls the empty state.
+  await page.evaluate(async () => {
+    const put = (name, data) => fetch(`/api/me/${name}`, {
+      method: "PUT", credentials: "same-origin",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
+    });
+    await put("book", { book: { IN_STOCKS: [], US_STOCKS: [], MUTUAL_FUNDS: [], CRYPTO: [], DIGITAL_METALS: [] }, source: "empty" });
+    await put("watchlist", { entries: [] });
+    localStorage.clear();
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
   await openTab("Portfolio");
   const fresh = await mainText();
-  check("a fresh visitor sees an empty book", /Your book is empty/i.test(fresh),
+  check("a fresh account sees an empty book", /Your book is empty/i.test(fresh),
     fresh.slice(0, 200));
   check("no holdings are pre-filled", /\b0 holdings\b/.test(fresh), fresh.slice(0, 200));
   check("the source badge says so", /\bEmpty\b/i.test(fresh));  // pill is CSS-uppercased
@@ -567,6 +612,44 @@ async function journeyQuotesFillBlanksButNeverOverwrite() {
   const axis = drill.slice(drill.indexOf("AXISBANK"), drill.indexOf("AXISBANK") + 160);
   check("a stub quote never overwrites a price the book already has",
     /1,?235\.40/.test(axis), axis);
+}
+
+// The book and the watchlist used to live in this browser's localStorage:
+// gone on a second device, and handed to the next person on a shared one.
+// They are now the signed-in user's documents on the server. Proof: wipe
+// localStorage, reload, and both are still there — then sign out and they
+// are not.
+async function journeyTheBookFollowsTheUserNotTheBrowser() {
+  console.log("\n— the book follows the user, not the browser —");
+  const before = await mainText();
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);                 // session check + document pull
+  await openTab("Portfolio");
+  const after = await mainText();
+  check("after wiping this browser the book is still there",
+    /\d{2,} holdings/.test(after) && !/Your book is empty/.test(after), after.slice(0, 200));
+  await page.getByText("Manage").first().click();
+  await page.waitForTimeout(600);
+  const watch = await mainText();
+  check("and so is the watchlist", /INFY|NVDA|TITAN|BHEL/.test(watch), watch.slice(0, 200));
+
+  // Sign out: the local copy goes with the session.
+  await openTab("Settings");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: /^Sign out$/ }).click();
+  await page.locator("#username").waitFor({ timeout: 10000 });
+  const stored = await page.evaluate(() => localStorage.getItem("tradepulse.book.v1"));
+  check("signing out clears the book from this browser", stored === null, String(stored));
+
+  // And signing back in brings it back from the server.
+  await page.locator("#username").fill(USER);
+  await page.locator("#password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForTimeout(2000);
+  await openTab("Portfolio");
+  check("signing in again restores it from the server",
+    /\d{2,} holdings/.test(await mainText()));
 }
 
 function report() {

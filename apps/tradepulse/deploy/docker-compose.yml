@@ -1,0 +1,40 @@
+# TradePulse behind Caddy, which terminates TLS with an automatic certificate.
+#
+#   cp apps/tradepulse/.env.example .env      # fill in the values you use
+#   TRADEPULSE_DOMAIN=tradepulse.example.com docker compose -f apps/tradepulse/deploy/docker-compose.yml up -d
+#
+# Run from the repository root. Point the domain's DNS at this host first;
+# Caddy needs ports 80 and 443 reachable to obtain the certificate.
+
+services:
+  app:
+    build:
+      context: ../../..
+      dockerfile: apps/tradepulse/deploy/Dockerfile
+    env_file: ../../../.env
+    environment:
+      # The public origin. The OAuth callback bounces here and the session
+      # cookie is Secure because this is not localhost.
+      TRADEPULSE_FRONTEND_URL: https://${TRADEPULSE_DOMAIN:?set TRADEPULSE_DOMAIN}/
+      KITE_REDIRECT_URL: https://${TRADEPULSE_DOMAIN}/api/kite/callback
+    volumes:
+      - tradepulse-data:/data
+    restart: unless-stopped
+    expose: ["8787"]
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      TRADEPULSE_DOMAIN: ${TRADEPULSE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  tradepulse-data:
+  caddy-data:
+  caddy-config:

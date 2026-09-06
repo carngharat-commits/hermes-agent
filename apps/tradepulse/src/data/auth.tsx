@@ -2,18 +2,22 @@
  * Who is using the app, and whether they may.
  *
  * The backend is the lock — every /api route returns 401 without its cookie.
- * This hook only decides what to *show*: the login screen, the app, or (when
- * there is no backend at all, as in a published prototype) a read-only
- * preview that says so on screen. The preview is not a way around the lock:
- * with no backend there is nothing behind it to reach.
+ * This hook only decides what to *show*: first-run setup, the sign-in, the
+ * app, or (when there is no backend at all, as in a published prototype) a
+ * read-only preview that says so on screen. The preview is not a way around
+ * the lock: with no backend there is nothing behind it to reach.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { getAuthSession, login as apiLogin, logout as apiLogout, type AuthUser } from "@/api/auth";
+import {
+  getAuthSession, login as apiLogin, logout as apiLogout, setupFirstAccount,
+  type AuthUser, type Credentials, type NewAccount,
+} from "@/api/auth";
 
 export type AuthStatus =
   | "checking"        // first request in flight
+  | "setup"           // backend answered: no accounts yet — create the first
   | "anonymous"       // backend answered: sign in
   | "authenticated"   // backend answered: in
   | "unreachable"     // no backend (network error) — offer the preview
@@ -24,7 +28,8 @@ type AuthState = {
   user: AuthUser | null;
   required: boolean;
   error: string | null;
-  login: (passcode: string) => Promise<boolean>;
+  login: (credentials: Credentials) => Promise<boolean>;
+  setup: (account: NewAccount) => Promise<boolean>;
   logout: () => Promise<void>;
   enterPreview: () => void;
 };
@@ -50,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(session.user);
           setStatus("authenticated");
         } else {
-          setStatus("anonymous");
+          setStatus(session.setup_required ? "setup" : "anonymous");
         }
       })
       .catch(() => {
@@ -60,21 +65,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const login = useCallback(async (passcode: string) => {
-    setError(null);
-    try {
-      const session = await apiLogin(passcode);
-      if (session.authenticated) {
-        setUser(session.user);
-        setStatus("authenticated");
-        return true;
-      }
-      setError("Sign-in did not complete.");
-      return false;
-    } catch (e) {
-      setError((e as Error).message);
-      return false;
+  const finish = (session: Awaited<ReturnType<typeof apiLogin>>) => {
+    if (session.authenticated) {
+      setUser(session.user);
+      setStatus("authenticated");
+      return true;
     }
+    setError("Sign-in did not complete.");
+    return false;
+  };
+
+  const login = useCallback(async (credentials: Credentials) => {
+    setError(null);
+    try { return finish(await apiLogin(credentials)); }
+    catch (e) { setError((e as Error).message); return false; }
+  }, []);
+
+  const setup = useCallback(async (account: NewAccount) => {
+    setError(null);
+    try { return finish(await setupFirstAccount(account)); }
+    catch (e) { setError((e as Error).message); return false; }
   }, []);
 
   const logout = useCallback(async () => {
@@ -86,8 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const enterPreview = useCallback(() => setStatus("preview"), []);
 
   const value = useMemo<AuthState>(
-    () => ({ status, user, required, error, login, logout, enterPreview }),
-    [status, user, required, error, login, logout, enterPreview],
+    () => ({ status, user, required, error, login, setup, logout, enterPreview }),
+    [status, user, required, error, login, setup, logout, enterPreview],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -15,6 +15,7 @@ import { OpportunitiesTab } from "@/features/opportunities/OpportunitiesTab";
 import { OrdersTab } from "@/features/orders/OrdersTab";
 import { PortfolioTab } from "@/features/portfolio/PortfolioTab";
 import { clearBook, loadDemoBook } from "@/data/book";
+import { addToWatchlist, removeFromWatchlist, useWatchlist } from "@/data/watchlist";
 import { PerformanceTab } from "@/features/performance/PerformanceTab";
 import { RiskAuditTab } from "@/features/risk/RiskAuditTab";
 import { SegmentDrill } from "@/features/portfolio/SegmentDrill";
@@ -58,7 +59,7 @@ export default function TradePulse() {
   // rows after that) until a Kite session exists, at which point the Zerodha
   // slice is replaced by the live book. See data/usePortfolio.ts.
   const { holdings, source: holdingsSource, addHolding } = usePortfolio();
-  const [watchlist, setWatchlist] = useState([]);
+  const watchlist = useWatchlist();
 
   const handleSave = (item) => {
     if (item.mode === "holding") {
@@ -71,7 +72,7 @@ export default function TradePulse() {
       };
       addHolding(h);
     } else {
-      setWatchlist([{
+      addToWatchlist({
         id: item.id, sym: item.sym, qty: item.qty, target: item.target, ltp: item.ltp,
         // Whether `ltp` is a price the user actually saw or was backfilled
         // from the target. Dropping it here made every target-only row look
@@ -79,7 +80,7 @@ export default function TradePulse() {
         // "market price" that was really the user's own target.
         ltpEntered: item.ltpEntered,
         segment: item.segment, broker: item.broker, note: item.note, photo: item.photo,
-      }, ...watchlist]);
+      });
     }
     setAddOpen(false);
   };
@@ -89,7 +90,7 @@ export default function TradePulse() {
   // Portfolio sub-view routing
   const renderPortfolio = () => {
     if (watchOpen) return <WatchlistView watchlist={watchlist} onAdd={() => openAdd("watchlist")}
-      onRemove={id => setWatchlist(watchlist.filter(w => w.id !== id))} onBack={() => setWatchOpen(false)} />;
+      onRemove={id => removeFromWatchlist(id)} onBack={() => setWatchOpen(false)} />;
     if (segmentDrill) return <SegmentDrill segment={segmentDrill} holdings={holdings} onBack={() => setSegmentDrill(null)} />;
     return <PortfolioTab holdings={holdings} watchlist={watchlist} source={holdingsSource}
       onOpenSegment={k => setSegmentDrill(k)}

@@ -5,16 +5,16 @@
  * constants that eight views imported directly. That is fine for a personal
  * dashboard and a blocker for anything public: every visitor saw that book.
  *
- * The book now starts empty, lives in a tiny external store, and persists in
- * localStorage on this device only. Views subscribe through `useBook()` and
- * re-render when it changes. The demo book (`demoBook.ts`) is loaded only on
- * request, and everything a user adds by hand lands here too, so the risk and
- * calendar views see it the same way they see a demo or a broker sync.
+ * The book starts empty and lives in a `PersistedStore`: mirrored to this
+ * browser, and once signed in, to the server as the user's own document, so
+ * a second device sees the same book and a shared device does not leak it.
+ * The demo book (`demoBook.ts`) is loaded only on request, and everything a
+ * user adds by hand lands here too, so the risk and calendar views see it the
+ * same way they see a demo or a broker sync.
  */
 
-import { useSyncExternalStore } from "react";
-
 import * as DEMO from "@/data/demoBook";
+import { PersistedStore, useStore } from "@/data/store";
 
 export type Book = {
   IN_STOCKS: any[];
@@ -26,52 +26,25 @@ export type Book = {
 
 export type BookSource = "empty" | "demo" | "manual" | "mixed";
 
-const EMPTY: Book = {
+type Stored = { book: Book; source: BookSource };
+
+const EMPTY_BOOK: Book = {
   IN_STOCKS: [], US_STOCKS: [], MUTUAL_FUNDS: [], CRYPTO: [], DIGITAL_METALS: [],
 };
 
-const STORAGE_KEY = "tradepulse.book.v1";
+export const bookStore = new PersistedStore<Stored>(
+  "book",
+  "tradepulse.book.v1",
+  () => ({ book: EMPTY_BOOK, source: "empty" }),
+  (s) => Object.values(s.book).every((rows) => rows.length === 0),
+);
 
-type Stored = { book: Book; source: BookSource };
-
-function load(): Stored {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Stored;
-      if (parsed && parsed.book) return { book: { ...EMPTY, ...parsed.book }, source: parsed.source ?? "manual" };
-    }
-  } catch {
-    // Private mode, disabled storage, or a corrupt entry: start empty.
-  }
-  return { book: EMPTY, source: "empty" };
-}
-
-let state: Stored = load();
-const listeners = new Set<() => void>();
-
-function commit(next: Stored) {
-  state = next;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // Nothing to do; the in-memory copy is still correct for this session.
-  }
-  listeners.forEach((fn) => fn());
-}
-
-const subscribe = (fn: () => void) => {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-};
-
-export const getBook = (): Book => state.book;
-export const getBookSource = (): BookSource => state.source;
+export const getBook = (): Book => bookStore.get().book;
+export const getBookSource = (): BookSource => bookStore.get().source;
 
 /** Subscribe a component to the book. Same identity until it changes. */
 export function useBook(): Book & { source: BookSource; isEmpty: boolean } {
-  const snapshot = useSyncExternalStore(subscribe, () => state, () => state);
-  const { book, source } = snapshot;
+  const { book, source } = useStore(bookStore);
   const isEmpty = Object.values(book).every((rows) => rows.length === 0);
   return { ...book, source, isEmpty };
 }
@@ -85,7 +58,7 @@ export function flattenBook(book: Book): any[] {
 }
 
 export function loadDemoBook(): void {
-  commit({
+  bookStore.set({
     book: {
       IN_STOCKS: [...DEMO.IN_STOCKS],
       US_STOCKS: [...DEMO.US_STOCKS],
@@ -98,7 +71,7 @@ export function loadDemoBook(): void {
 }
 
 export function clearBook(): void {
-  commit({ book: EMPTY, source: "empty" });
+  bookStore.set({ book: EMPTY_BOOK, source: "empty" });
 }
 
 const SEGMENT_KEY: Record<string, keyof Book> = {
@@ -107,11 +80,9 @@ const SEGMENT_KEY: Record<string, keyof Book> = {
 
 /** Add one holding the user typed in. Persists with the rest of the book. */
 export function addToBook(holding: any): void {
+  const { book, source: current } = bookStore.get();
   const key = SEGMENT_KEY[holding.segment] ?? "IN_STOCKS";
   const source: BookSource =
-    state.source === "empty" ? "manual" : state.source === "demo" ? "mixed" : state.source;
-  commit({
-    book: { ...state.book, [key]: [...state.book[key], holding] },
-    source,
-  });
+    current === "empty" ? "manual" : current === "demo" ? "mixed" : current;
+  bookStore.set({ book: { ...book, [key]: [...book[key], holding] }, source });
 }

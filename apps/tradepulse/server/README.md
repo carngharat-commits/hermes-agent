@@ -17,13 +17,15 @@ and serves the identical routes against a fake account.
 
 ## The app's own lock
 
-`auth.py`. Every `/api` route except `/healthz`, `/api/auth/login` and
-`/api/auth/session` returns 401 without the `tradepulse_auth` cookie. The Kite
-session sits *behind* that lock: it proves a Zerodha login, not the right to
-use this deployment, and most screens never touch the broker. Details in the
-module docstring; the short version is one shared passcode, constant-time
-compare, lockout after five failures, and a generated passcode printed to the
-log rather than an open door when none is configured.
+`auth.py` holds the rules, `persist.py` the storage. Every `/api` route except
+`/healthz`, `/api/auth/session`, `/api/auth/setup` and `/api/auth/login`
+returns 401 without the `tradepulse_auth` cookie. Accounts are username +
+password (PBKDF2-HMAC-SHA256, 600k iterations, per-user salt); the first one
+is created by `POST /api/auth/setup`, which works exactly once and makes that
+account the owner. The owner adds accounts with `POST /api/auth/users`; anyone
+changes their own password with `POST /api/auth/password`. Lockout after five
+failures per client address and per username. The Kite session sits *behind*
+this lock: it proves a Zerodha login, not the right to use this deployment.
 
 ## The login flow
 
@@ -49,9 +51,13 @@ Kite has no `state` parameter of its own, which is why the nonce rides along in
 | Route | Purpose |
 | --- | --- |
 | `GET /healthz` | Liveness, mode, live session count |
-| `GET /api/auth/session` | Whether this browser is signed in to the app |
-| `POST /api/auth/login` | Sign in with `TRADEPULSE_PASSCODE`; sets the auth cookie |
+| `GET /api/auth/session` | Signed in? First-run setup needed? Who? |
+| `POST /api/auth/setup` | Create the first account (owner); works once |
+| `POST /api/auth/login` | Username + password; sets the auth cookie |
 | `POST /api/auth/logout` | Sign out, and drop the broker session with it |
+| `POST /api/auth/password` | Change your own password |
+| `GET/POST /api/auth/users` | Owner: list and add accounts |
+| `GET/PUT /api/me/{book,watchlist}` | The signed-in user's own documents, replaced whole |
 | `GET /api/quotes?symbols=A,B` | Latest price per symbol and its source (kite / http / stub) |
 | `GET /api/quotes/status` | Which quote source is in use |
 | `GET /api/ai/status` | Whether a model is configured for the chat drawer |
@@ -169,6 +175,15 @@ entries.
 
 Holdings and orders don't move fast enough for 15 seconds of staleness to
 matter. Anything that does — live quotes — will want its own path.
+
+## Serving the UI (`static.py`)
+
+With `TRADEPULSE_STATIC_DIR` pointing at a `vite build` output this process
+serves it too: hashed assets, `index.html` uncached for every non-API path so
+deep links and reloads work, and `/api/*` never swallowed by the fallback. The
+Dockerfile in `../deploy` sets it; development leaves it blank and lets Vite
+serve the UI. uvicorn trusts `X-Forwarded-For` so the lockout counters see the
+real client behind a proxy.
 
 ## Sessions and secrets (`persist.py`)
 

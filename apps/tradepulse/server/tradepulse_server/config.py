@@ -39,11 +39,10 @@ class Settings:
 
     # The app's own login. Required by default; tests opt out explicitly so
     # that a forgotten variable can never quietly leave a deployment open.
+    # Accounts live in the sessions database; the first one is created from
+    # the sign-in screen on first run and becomes the owner.
     auth_required: bool = True
-    passcode: str = ""
     auth_cookie_name: str = "tradepulse_auth"
-    # Shown in the sidebar once logged in. A single-user app has one name.
-    user_name: str = "Investor"
 
     # The AI chat drawer. Unset means the drawer says so rather than failing;
     # the key lives here and only here — the browser never sees it.
@@ -80,6 +79,12 @@ class Settings:
     # restart no longer logs everyone out.
     sessions_db_path: str = ":memory:"
 
+    # A `vite build` output to serve from this process. Empty means the UI
+    # is served by something else (Vite in development).
+    static_dir: str = ""
+    # uvicorn's reloader: on for local development, off in a container.
+    reload: bool = True
+
     @property
     def configured(self) -> bool:
         """True when real Kite credentials are present.
@@ -114,9 +119,7 @@ def load_settings() -> Settings:
         cookie_secure=_flag("TRADEPULSE_COOKIE_SECURE", not _is_local(frontend_url)),
         cookie_samesite=os.environ.get("TRADEPULSE_COOKIE_SAMESITE", "lax"),
         auth_required=_flag("TRADEPULSE_AUTH_REQUIRED", True),
-        passcode=os.environ.get("TRADEPULSE_PASSCODE", "").strip(),
         auth_cookie_name=os.environ.get("TRADEPULSE_AUTH_COOKIE_NAME", "tradepulse_auth"),
-        user_name=os.environ.get("TRADEPULSE_USER_NAME", "Investor").strip() or "Investor",
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip(),
         ai_model=os.environ.get("TRADEPULSE_AI_MODEL", "claude-opus-5").strip() or "claude-opus-5",
         quotes_url=os.environ.get("TRADEPULSE_QUOTES_URL", "").strip(),
@@ -125,7 +128,7 @@ def load_settings() -> Settings:
         quotes_auth_header=os.environ.get("TRADEPULSE_QUOTES_AUTH_HEADER", "").strip(),
         host=os.environ.get("TRADEPULSE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TRADEPULSE_PORT", "8787")),
-        intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", "data/tradepulse.db").strip(),
+        intel_db_path=os.environ.get("TRADEPULSE_INTEL_DB", str(Path(data_dir) / "tradepulse.db")).strip(),
         intel_cycle_seconds=int(os.environ.get("TRADEPULSE_CYCLE_SECONDS", "900")),
         state_secret=resolve_state_secret(
             os.environ.get("TRADEPULSE_STATE_SECRET", "").strip(), data_dir
@@ -133,4 +136,6 @@ def load_settings() -> Settings:
         sessions_db_path=os.environ.get(
             "TRADEPULSE_SESSIONS_DB", str(Path(data_dir) / "sessions.db")
         ).strip(),
+        static_dir=os.environ.get("TRADEPULSE_STATIC_DIR", "").strip(),
+        reload=_flag("TRADEPULSE_RELOAD", True),
     )

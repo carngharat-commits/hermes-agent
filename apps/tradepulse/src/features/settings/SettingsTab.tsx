@@ -14,6 +14,7 @@ import { SettingRow } from "@/features/settings/SettingRow";
 import { Toggle3 } from "@/features/settings/Toggle3";
 import { ToggleRow } from "@/features/settings/ToggleRow";
 import { useAuth } from "@/data/auth";
+import { AccountPanel } from "@/features/auth/AccountPanel";
 import { useThemeMode } from "@/theme/ThemeContext";
 
 export const SettingsTab = () => {
@@ -165,7 +166,7 @@ export const SettingsTab = () => {
       {/* Account */}
       <Card>
         <CardHeader title="Account" icon={Users} />
-        <SettingRow label="Signed in as" sub={auth.status === "preview" ? "read-only preview" : "passcode session"}>
+        <SettingRow label="Signed in as" sub={auth.status === "preview" ? "read-only preview" : `@${auth.user?.username ?? "—"} · ${auth.user?.role ?? ""}`}>
           <div className="text-[12.5px] font-semibold" style={{ color: T.fg }}>{auth.user?.name ?? "Investor"}</div>
         </SettingRow>
         <div className="pt-3 mt-3" style={{ borderTop: `1px solid ${T.border}` }}>
@@ -177,6 +178,8 @@ export const SettingsTab = () => {
           </button>
         </div>
       </Card>
+
+      <AccountPanel />
 
       {/* About */}
       <div className="text-center text-[10.5px] pt-4" style={{ color: T.fgDim, ...FONT_MONO }}>
